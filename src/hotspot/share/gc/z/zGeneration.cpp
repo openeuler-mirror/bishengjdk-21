@@ -860,7 +860,7 @@ void ZGenerationYoung::mark_start() {
   // Enter mark phase
   set_phase(Phase::Mark);
 
-  // Reset marking information and mark roots
+  // Reset marking information
   _mark.start();
 
   // Flip remembered set bits
@@ -1212,7 +1212,7 @@ void ZGenerationOld::mark_start() {
   // Enter mark phase
   set_phase(Phase::Mark);
 
-  // Reset marking information and mark roots
+  // Reset marking information
   _mark.start();
 
   // Update statistics
