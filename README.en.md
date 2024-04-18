@@ -1,36 +1,12 @@
-# bishengjdk-21
+# 欢迎来到JDK！
 
-#### Description
-BiSheng JDK 21 is a high-performance, production-ready distribution of OpenJDK 21.
+有关构建说明，请参阅
 
-#### Software Architecture
-Software architecture description
+[online documentation](https://openjdk.org/groups/build/doc/building.html)
 
-#### Installation
+或以下文件之一：
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+- [doc/building.html](doc/building.html) (html version)
+- [doc/building.md](doc/building.md) (markdown version)
 
-#### Instructions
-
-1.  xxxx
-2.  xxxx
-3.  xxxx
-
-#### Contribution
-
-1.  Fork the repository
-2.  Create Feat_xxx branch
-3.  Commit your code
-4.  Create Pull Request
-
-
-#### Gitee Feature
-
-1.  You can use Readme\_XXX.md to support different languages, such as Readme\_en.md, Readme\_zh.md
-2.  Gitee blog [blog.gitee.com](https://blog.gitee.com)
-3.  Explore open source project [https://gitee.com/explore](https://gitee.com/explore)
-4.  The most valuable open source project [GVP](https://gitee.com/gvp)
-5.  The manual of Gitee [https://gitee.com/help](https://gitee.com/help)
-6.  The most popular members  [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+有关OpenJDK社区和JDK的更多信息，请参阅<https://openjdk.org/>有关JDK问题跟踪，请参阅<https://bugs.openjdk.org>。
