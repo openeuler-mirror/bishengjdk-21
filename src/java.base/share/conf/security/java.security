@@ -83,7 +83,7 @@ security.provider.tbd=SunMSCAPI
 #ifdef macosx
 security.provider.tbd=Apple
 #endif
-#security.provider.tbd=SunPKCS11 ${java.home}/lib/security/nss.cfg
+security.provider.tbd=SunPKCS11
 
 #
 # A list of preferred providers for specific algorithms. These providers will
@@ -313,8 +313,6 @@ keystore.type.compat=true
 #
 package.access=sun.misc.,\
                sun.reflect.,\
-               org.GNOME.Accessibility.,\
-               org.GNOME.Bonobo.,\
 
 #
 # List of comma-separated packages that start with or equal this string
@@ -327,8 +325,6 @@ package.access=sun.misc.,\
 #
 package.definition=sun.misc.,\
                    sun.reflect.,\
-                   org.GNOME.Accessibility.,\
-                   org.GNOME.Bonobo.,\
 
 #
 # Determines whether this properties file can be appended to
