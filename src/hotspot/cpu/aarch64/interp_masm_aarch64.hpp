@@ -36,8 +36,6 @@ typedef ByteSize (*OffsetFunction)(uint);
 
 class InterpreterMacroAssembler: public MacroAssembler {
  protected:
-
- protected:
   // Interpreter specific version of call_VM_base
   using MacroAssembler::call_VM_leaf_base;
 
@@ -111,8 +109,6 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void get_dispatch();
 
   // Helpers for runtime call arguments/results
-
-  // Helpers for runtime call arguments/results
   void get_method(Register reg) {
     ldr(reg, Address(rfp, frame::interpreter_frame_method_offset * wordSize));
   }
@@ -183,7 +179,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void load_ptr(int n, Register val);
   void store_ptr(int n, Register val);
 
-// Load float value from 'address'. The value is loaded onto the FPU register v0.
+  // Load float value from 'address'. The value is loaded onto the FPU register v0.
   void load_float(Address src);
   void load_double(Address src);
 
