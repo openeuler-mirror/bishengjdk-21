@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -640,12 +640,11 @@ public interface RandomGenerator {
      *
      * @throws IllegalArgumentException if {@code bound} is not positive
      *
-     * @implSpec The default implementation checks that {@code bound} is a
-     * positive {@code int}. Then invokes {@code nextInt()}, limiting the result
-     * to be greater than or equal zero and less than {@code bound}. If {@code bound}
-     * is a power of two then limiting is a simple masking operation. Otherwise,
-     * the result is re-calculated by invoking {@code nextInt()} until the
-     * result is greater than or equal zero and less than {@code bound}.
+     * @implSpec The default implementation checks that {@code bound} is positive.
+     * It then invokes {@link #nextInt()} one or more times to ensure a uniform
+     * distribution in the range 0 (inclusive)
+     * to {@code bound} (exclusive).
+     * It assumes the distribution of {@link #nextInt()} to be uniform.
      */
     default int nextInt(int bound) {
         RandomSupport.checkBound(bound);
@@ -666,13 +665,12 @@ public interface RandomGenerator {
      * @throws IllegalArgumentException if {@code origin} is greater than
      *         or equal to {@code bound}
      *
-     * @implSpec The default implementation checks that {@code origin} and
-     * {@code bound} are positive {@code ints}. Then invokes {@code nextInt()},
-     * limiting the result to be greater that or equal {@code origin} and less
-     * than {@code bound}. If {@code bound} is a power of two then limiting is a
-     * simple masking operation. Otherwise, the result is re-calculated  by
-     * invoking {@code nextInt()} until the result is greater than or equal
-     * {@code origin} and less than {@code bound}.
+     * @implSpec The default implementation checks that {@code origin}
+     * is less than {@code bound}.
+     * It then invokes {@link #nextInt()} one or more times to ensure a uniform
+     * distribution in the range {@code origin} (inclusive)
+     * to {@code bound} (exclusive).
+     * It assumes the distribution of {@link #nextInt()} to be uniform.
      */
     default int nextInt(int origin, int bound) {
         RandomSupport.checkRange(origin, bound);
@@ -699,13 +697,11 @@ public interface RandomGenerator {
      *
      * @throws IllegalArgumentException if {@code bound} is not positive
      *
-     * @implSpec The default implementation checks that {@code bound} is a
-     * positive  {@code long}. Then invokes {@code nextLong()}, limiting the
-     * result to be greater than or equal zero and less than {@code bound}. If
-     * {@code bound} is a power of two then limiting is a simple masking
-     * operation. Otherwise, the result is re-calculated by invoking
-     * {@code nextLong()} until the result is greater than or equal zero and
-     * less than {@code bound}.
+     * @implSpec The default implementation checks that {@code bound} is positive.
+     * It then invokes {@link #nextLong()} one or more times to ensure a uniform
+     * distribution in the range 0 (inclusive)
+     * to {@code bound} (exclusive).
+     * It assumes the distribution of {@link #nextLong()} to be uniform.
      */
     default long nextLong(long bound) {
         RandomSupport.checkBound(bound);
@@ -726,13 +722,12 @@ public interface RandomGenerator {
      * @throws IllegalArgumentException if {@code origin} is greater than
      *         or equal to {@code bound}
      *
-     * @implSpec The default implementation checks that {@code origin} and
-     * {@code bound} are positive {@code longs}. Then invokes {@code nextLong()},
-     * limiting the result to be greater than or equal {@code origin} and less
-     * than {@code bound}. If {@code bound} is a power of two then limiting is a
-     * simple masking operation. Otherwise, the result is re-calculated by
-     * invoking {@code nextLong()} until the result is greater than or equal
-     * {@code origin} and less than {@code bound}.
+     * @implSpec The default implementation checks that {@code origin}
+     * is less than {@code bound}.
+     * It then invokes {@link #nextLong()} one or more times to ensure a uniform
+     * distribution in the range {@code origin} (inclusive)
+     * to {@code bound} (exclusive).
+     * It assumes the distribution of {@link #nextLong()} to be uniform.
      */
     default long nextLong(long origin, long bound) {
         RandomSupport.checkRange(origin, bound);
