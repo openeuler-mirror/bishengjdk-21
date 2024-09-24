@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -136,7 +136,7 @@ final class Control {
             @Override
             public String run() {
                 try {
-                    delegate.combine(Collections.unmodifiableSet(values));
+                    return delegate.combine(Collections.unmodifiableSet(values));
                 } catch (Throwable t) {
                     // Prevent malicious user to propagate exception callback in the wrong context
                     Logger.log(LogTag.JFR_SETTING, LogLevel.WARN, "Exception occurred when combining " + values + " for " + getClass());
