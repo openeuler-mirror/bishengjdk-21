@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -1119,7 +1119,6 @@ public final class Main {
             }
         }
 
-        KeyStore cakstore = buildTrustedCerts();
         // -trustcacerts can be specified on -importcert, -printcert or -printcrl.
         // Reset it so that warnings on CA cert will remain for other command.
         if (command != IMPORTCERT && command != PRINTCERT
@@ -1128,6 +1127,7 @@ public final class Main {
         }
 
         if (trustcacerts) {
+            KeyStore cakstore = buildTrustedCerts();
             if (cakstore != null) {
                 caks = cakstore;
             } else {
