@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -263,9 +263,6 @@ cpu_isalist(void)
     SYSTEM_INFO info;
     GetSystemInfo(&info);
     switch (info.wProcessorArchitecture) {
-#ifdef PROCESSOR_ARCHITECTURE_IA64
-    case PROCESSOR_ARCHITECTURE_IA64: return "ia64";
-#endif
 #ifdef PROCESSOR_ARCHITECTURE_AMD64
     case PROCESSOR_ARCHITECTURE_AMD64: return "amd64";
 #endif
