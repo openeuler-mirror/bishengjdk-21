@@ -1221,9 +1221,6 @@ const int ObjectAlignmentInBytes = 8;
   product(bool, UseCounterDecay, true,                                      \
           "Adjust recompilation counters")                                  \
                                                                             \
-  develop(intx, CounterHalfLifeTime,    30,                                 \
-          "Half-life time of invocation counters (in seconds)")             \
-                                                                            \
   develop(intx, CounterDecayMinIntervalLength,   500,                       \
           "The minimum interval (in milliseconds) between invocation of "   \
           "CounterDecay")                                                   \
