@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -98,12 +98,10 @@ void ClassLoaderExt::process_module_table(JavaThread* current, ModuleEntryTable*
     ModulePathsGatherer(JavaThread* current, GrowableArray<char*>* module_paths) :
       _current(current), _module_paths(module_paths) {}
     void do_module(ModuleEntry* m) {
-      char* path = m->location()->as_C_string();
-      if (strncmp(path, "file:", 5) == 0) {
-        path = ClassLoader::skip_uri_protocol(path);
-        char* path_copy = NEW_RESOURCE_ARRAY(char, strlen(path) + 1);
-        strcpy(path_copy, path);
-        _module_paths->append(path_copy);
+      char* uri = m->location()->as_C_string();
+      if (strncmp(uri, "file:", 5) == 0) {
+        char* path = ClassLoader::uri_to_path(uri);
+        _module_paths->append(path);
       }
     }
   };
