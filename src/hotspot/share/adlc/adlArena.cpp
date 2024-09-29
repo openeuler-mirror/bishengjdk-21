@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,8 +62,6 @@ void AdlChunk::chop() {
   AdlChunk *k = this;
   while( k ) {
     AdlChunk *tmp = k->_next;
-    // clear out this chunk (to detect allocation bugs)
-    memset(k, 0xBE, k->_len);
     free(k);                    // Free chunk (was malloc'd)
     k = tmp;
   }
