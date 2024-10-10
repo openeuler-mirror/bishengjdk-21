@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -2004,7 +2004,7 @@ LibraryCallKit::classify_unsafe_addr(Node* &base, Node* &offset, BasicType type)
   if (base_type == nullptr) {
     // Unknown type.
     return Type::AnyPtr;
-  } else if (base_type == TypePtr::NULL_PTR) {
+  } else if (_gvn.type(base->uncast()) == TypePtr::NULL_PTR) {
     // Since this is a null+long form, we have to switch to a rawptr.
     base   = _gvn.transform(new CastX2PNode(offset));
     offset = MakeConX(0);
@@ -2322,8 +2322,9 @@ bool LibraryCallKit::inline_unsafe_access(bool is_store, const BasicType type, c
   SafePointNode* old_map = clone_map();
 
   Node* adr = make_unsafe_address(base, offset, type, kind == Relaxed);
+  assert(!stopped(), "Inlining of unsafe access failed: address construction stopped unexpectedly");
 
-  if (_gvn.type(base)->isa_ptr() == TypePtr::NULL_PTR) {
+  if (_gvn.type(base->uncast())->isa_ptr() == TypePtr::NULL_PTR) {
     if (type != T_OBJECT) {
       decorators |= IN_NATIVE; // off-heap primitive access
     } else {
