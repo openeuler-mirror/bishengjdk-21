@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -364,7 +364,7 @@ class ClassLoader: AllStatic {
   // entries during shared classpath setup time.
   static int num_module_path_entries();
   static void  exit_with_path_failure(const char* error, const char* message);
-  static char* skip_uri_protocol(char* source);
+  static char* uri_to_path(const char* uri);
   static void  record_result(JavaThread* current, InstanceKlass* ik,
                              const ClassFileStream* stream, bool redefined);
 #endif
