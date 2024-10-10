@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -416,9 +416,9 @@ final class DCmdStart extends AbstractDCmd {
                 $ jcmd <pid> JFR.start filename=dump.jfr
                 $ jcmd <pid> JFR.start filename=%s
                 $ jcmd <pid> JFR.start dumponexit=true
-                $ jcmd <pid> JFR.start maxage=1h,maxsize=1000M
+                $ jcmd <pid> JFR.start maxage=1h maxsize=1000M
                 $ jcmd <pid> JFR.start settings=profile
-                $ jcmd <pid> JFR.start delay=5m,settings=my.jfc
+                $ jcmd <pid> JFR.start delay=5m settings=my.jfc
                 $ jcmd <pid> JFR.start gc=high method-profiling=high
                 $ jcmd <pid> JFR.start jdk.JavaMonitorEnter#threshold=1ms
                 $ jcmd <pid> JFR.start +HelloWorld#enabled=true +HelloWorld#stackTrace=true
