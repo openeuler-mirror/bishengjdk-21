@@ -228,7 +228,7 @@ final class StringConcatHelper {
      * @param indexCoder final char index in the buffer, along with coder packed
      *                   into higher bits.
      * @param buf        buffer to append to
-     * @param value      boolean value to encode
+     * @param value      char value to encode
      * @param prefix     a constant to prepend before value
      * @return           updated index (coder value retained)
      */
@@ -263,7 +263,7 @@ final class StringConcatHelper {
      * @param indexCoder final char index in the buffer, along with coder packed
      *                   into higher bits.
      * @param buf        buffer to append to
-     * @param value      boolean value to encode
+     * @param value      int value to encode
      * @param prefix     a constant to prepend before value
      * @return           updated index (coder value retained)
      */
@@ -298,7 +298,7 @@ final class StringConcatHelper {
      * @param indexCoder final char index in the buffer, along with coder packed
      *                   into higher bits.
      * @param buf        buffer to append to
-     * @param value      boolean value to encode
+     * @param value      long value to encode
      * @param prefix     a constant to prepend before value
      * @return           updated index (coder value retained)
      */
@@ -335,7 +335,7 @@ final class StringConcatHelper {
      * @param indexCoder final char index in the buffer, along with coder packed
      *                   into higher bits.
      * @param buf        buffer to append to
-     * @param value      boolean value to encode
+     * @param value      String value to encode
      * @param prefix     a constant to prepend before value
      * @return           updated index (coder value retained)
      */
