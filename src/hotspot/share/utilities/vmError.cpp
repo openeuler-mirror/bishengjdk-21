@@ -59,6 +59,7 @@
 #include "runtime/vmOperations.hpp"
 #include "runtime/vm_version.hpp"
 #include "services/memTracker.hpp"
+#include "sanitizers/ub.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/decoder.hpp"
 #include "utilities/defaultStream.hpp"
@@ -2060,6 +2061,8 @@ typedef void (*voidfun_t)();
 
 // Crash with an authentic sigfpe
 volatile int sigfpe_int = 0;
+
+ATTRIBUTE_NO_UBSAN
 static void ALWAYSINLINE crash_with_sigfpe() {
 
   // generate a native synchronous SIGFPE where possible;
