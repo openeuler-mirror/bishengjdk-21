@@ -22,7 +22,14 @@
  */
 
 /*
+ * This file has been modified by Loongson Technology in 2023, These
+ * modifications are Copyright (c) 2023, Loongson Technology, and are made
+ * available on the same license terms set forth above.
+ */
+
+/*
  * @test
+ * @bug 8183390 8332905
  * @summary Vectorization test on bug-prone shift operation
  * @library /test/lib /
  *
@@ -35,7 +42,7 @@
  *                   -XX:+WhiteBoxAPI
  *                   compiler.vectorization.runner.ArrayShiftOpTest
  *
- * @requires (os.simpleArch == "x64") | (os.simpleArch == "aarch64")
+ * @requires (os.simpleArch == "x64") | (os.simpleArch == "aarch64") | (os.simpleArch == "loongarch64")
  * @requires vm.compiler2.enabled
  */
 
@@ -48,6 +55,7 @@ import java.util.Random;
 public class ArrayShiftOpTest extends VectorizationTestRunner {
 
     private static final int SIZE = 543;
+    private static       int size = 543;
 
     private int[] ints;
     private long[] longs;
@@ -71,7 +79,7 @@ public class ArrayShiftOpTest extends VectorizationTestRunner {
     }
 
     @Test
-    @IR(applyIfCPUFeatureOr = {"asimd", "true", "avx512f", "true"},
+    @IR(applyIfCPUFeatureOr = {"asimd", "true", "avx2", "true"},
         counts = {IRNode.STORE_VECTOR, ">0"})
     @IR(applyIfCPUFeature = {"avx512f", "true"},
         counts = {IRNode.ROTATE_RIGHT_V, ">0"})
@@ -84,7 +92,23 @@ public class ArrayShiftOpTest extends VectorizationTestRunner {
     }
 
     @Test
-    @IR(applyIfCPUFeatureOr = {"asimd", "true", "avx512f", "true"},
+    @IR(applyIfCPUFeatureOr = {"sve", "true", "avx2", "true"},
+        counts = {IRNode.STORE_VECTOR, ">0"})
+    @IR(applyIfCPUFeature = {"avx512f", "true"},
+        counts = {IRNode.ROTATE_RIGHT_V, ">0"})
+    // Requires size to not be known at compile time, otherwise the shift
+    // can get constant folded with the (iv + const) pattern from the
+    // PopulateIndex.
+    public int[] intCombinedRotateShiftWithPopulateIndex() {
+        int[] res = new int[size];
+        for (int i = 0; i < size; i++) {
+            res[i] = (i << 14) | (i >>> 18);
+        }
+        return res;
+    }
+
+    @Test
+    @IR(applyIfCPUFeatureOr = {"asimd", "true", "avx2", "true"},
         counts = {IRNode.STORE_VECTOR, ">0"})
     @IR(applyIfCPUFeature = {"avx512f", "true"},
         counts = {IRNode.ROTATE_RIGHT_V, ">0"})

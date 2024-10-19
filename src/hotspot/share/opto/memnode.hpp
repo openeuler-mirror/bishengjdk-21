@@ -22,6 +22,12 @@
  *
  */
 
+/*
+ * This file has been modified by Loongson Technology in 2023, These
+ * modifications are Copyright (c) 2023, Loongson Technology, and are made
+ * available on the same license terms set forth above.
+ */
+
 #ifndef SHARE_OPTO_MEMNODE_HPP
 #define SHARE_OPTO_MEMNODE_HPP
 
@@ -289,6 +295,8 @@ public:
   bool has_unknown_control_dependency() const  { return _control_dependency == UnknownControl; }
   bool has_pinned_control_dependency() const   { return _control_dependency == Pinned; }
 
+  LoadNode* pin_array_access_node() const;
+
 #ifndef PRODUCT
   virtual void dump_spec(outputStream *st) const;
 #endif
@@ -314,6 +322,8 @@ protected:
   virtual bool depends_only_on_test() const {
     return adr_type() != TypeRawPtr::BOTTOM && _control_dependency == DependsOnlyOnTest;
   }
+
+  LoadNode* clone_pinned() const;
 };
 
 //------------------------------LoadBNode--------------------------------------
@@ -1287,6 +1297,14 @@ public:
     : MemBarNode(C, alias_idx, precedent) {}
   virtual int Opcode() const;
   virtual uint ideal_reg() const { return 0; } // not matched in the AD file
+};
+
+// Used to prevent LoadLoad reorder for same address.
+class SameAddrLoadFenceNode: public MemBarNode {
+public:
+  SameAddrLoadFenceNode(Compile* C, int alias_idx, Node* precedent)
+    : MemBarNode(C, alias_idx, precedent) {}
+  virtual int Opcode() const;
 };
 
 class OnSpinWaitNode: public MemBarNode {

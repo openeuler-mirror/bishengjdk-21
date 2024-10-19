@@ -33,11 +33,13 @@ class SmallRegisterMap {
   constexpr SmallRegisterMap() = default;
   ~SmallRegisterMap() = default;
   NONCOPYABLE(SmallRegisterMap);
+
 public:
   static const SmallRegisterMap* instance() {
     static constexpr SmallRegisterMap the_instance{};
     return &the_instance;
   }
+
 private:
   static void assert_is_rbp(VMReg r) NOT_DEBUG_RETURN
                                      DEBUG_ONLY({ assert(r == rbp->as_VMReg() || r == rbp->as_VMReg()->next(), "Reg: %s", r->name()); })
