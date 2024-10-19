@@ -30,7 +30,7 @@
 
 // Java frames don't have callee saved registers, so we can use a smaller RegisterMap
 class SmallRegisterMap {
- constexpr SmallRegisterMap() = default;
+  constexpr SmallRegisterMap() = default;
   ~SmallRegisterMap() = default;
   NONCOPYABLE(SmallRegisterMap);
 
@@ -39,7 +39,7 @@ public:
     static constexpr SmallRegisterMap the_instance{};
     return &the_instance;
   }
-public:
+
   // as_RegisterMap is used when we didn't want to templatize and abstract over RegisterMap type to support SmallRegisterMap
   // Consider enhancing SmallRegisterMap to support those cases
   const RegisterMap* as_RegisterMap() const { return nullptr; }

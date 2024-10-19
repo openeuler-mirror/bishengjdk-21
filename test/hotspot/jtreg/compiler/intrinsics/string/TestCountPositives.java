@@ -21,13 +21,21 @@
  * questions.
  */
 
+/*
+ * This file has been modified by Loongson Technology in 2022. These
+ * modifications are Copyright (c) 2022 Loongson Technology, and are made
+ * available on the same license terms set forth above.
+ */
+
 package compiler.intrinsics.string;
+
+import jdk.test.lib.Platform;
 
 /*
  * @test
  * @bug 8999999
  * @summary Validates StringCoding.countPositives intrinsic with a small range of tests.
- * @library /compiler/patches
+ * @library /compiler/patches /test/lib
  *
  * @build java.base/java.lang.Helper
  * @run main compiler.intrinsics.string.TestCountPositives
@@ -91,7 +99,7 @@ public class TestCountPositives {
                     int calculated = Helper.StringCodingCountPositives(tBa, off, len);
                     int expected = countPositives(tBa, off, len);
                     if (calculated != expected) {
-                        if (expected != len && calculated >= 0 && calculated < expected) {
+                        if (!Platform.isLoongArch64() && expected != len && calculated >= 0 && calculated < expected) {
                             // allow intrinsics to return early with a lower value,
                             // but only if we're not expecting the full length (no
                             // negative bytes)
