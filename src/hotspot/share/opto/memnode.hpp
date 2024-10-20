@@ -22,12 +22,6 @@
  *
  */
 
-/*
- * This file has been modified by Loongson Technology in 2023, These
- * modifications are Copyright (c) 2023, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
 #ifndef SHARE_OPTO_MEMNODE_HPP
 #define SHARE_OPTO_MEMNODE_HPP
 
@@ -1297,14 +1291,6 @@ public:
     : MemBarNode(C, alias_idx, precedent) {}
   virtual int Opcode() const;
   virtual uint ideal_reg() const { return 0; } // not matched in the AD file
-};
-
-// Used to prevent LoadLoad reorder for same address.
-class SameAddrLoadFenceNode: public MemBarNode {
-public:
-  SameAddrLoadFenceNode(Compile* C, int alias_idx, Node* precedent)
-    : MemBarNode(C, alias_idx, precedent) {}
-  virtual int Opcode() const;
 };
 
 class OnSpinWaitNode: public MemBarNode {

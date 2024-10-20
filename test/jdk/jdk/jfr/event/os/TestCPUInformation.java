@@ -21,12 +21,6 @@
  * questions.
  */
 
-/*
- * This file has been modified by Loongson Technology in 2022, These
- * modifications are Copyright (c) 2021, 2022, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
 package jdk.jfr.event.os;
 
 import java.util.List;
@@ -58,8 +52,8 @@ public class TestCPUInformation {
             Events.assertField(event, "hwThreads").atLeast(1);
             Events.assertField(event, "cores").atLeast(1);
             Events.assertField(event, "sockets").atLeast(1);
-            Events.assertField(event, "cpu").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "RISCV64", "s390", "LoongArch");
-            Events.assertField(event, "description").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "RISCV64", "s390", "LoongArch");
+            Events.assertField(event, "cpu").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "RISCV64", "s390");
+            Events.assertField(event, "description").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "RISCV64", "s390");
         }
     }
 }

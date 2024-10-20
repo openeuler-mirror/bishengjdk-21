@@ -22,12 +22,6 @@
  *
  */
 
-/*
- * This file has been modified by Loongson Technology in 2023, These
- * modifications are Copyright (c) 2023, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
 #include "precompiled.hpp"
 #include "classfile/javaClasses.hpp"
 #include "compiler/compileLog.hpp"
@@ -3324,7 +3318,6 @@ MemBarNode* MemBarNode::make(Compile* C, int opcode, int atp, Node* pn) {
   case Op_MemBarReleaseLock: return new MemBarReleaseLockNode(C, atp, pn);
   case Op_MemBarVolatile:    return new MemBarVolatileNode(C, atp, pn);
   case Op_MemBarCPUOrder:    return new MemBarCPUOrderNode(C, atp, pn);
-  case Op_SameAddrLoadFence: return new SameAddrLoadFenceNode(C, atp, pn);
   case Op_OnSpinWait:        return new OnSpinWaitNode(C, atp, pn);
   case Op_Initialize:        return new InitializeNode(C, atp, pn);
   default: ShouldNotReachHere(); return nullptr;

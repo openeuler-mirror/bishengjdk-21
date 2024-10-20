@@ -21,12 +21,6 @@
  * questions.
  */
 
-/*
- * This file has been modified by Loongson Technology in 2023, These
- * modifications are Copyright (c) 2023, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
 package compiler.c2.irTests;
 
 import compiler.lib.ir_framework.*;
@@ -38,7 +32,7 @@ import java.util.Random;
 /*
  * @test
  * @bug 8300256
- * @requires (os.simpleArch == "x64") | (os.simpleArch == "aarch64") | (os.simpleArch == "loongarch64")
+ * @requires (os.simpleArch == "x64") | (os.simpleArch == "aarch64")
  * @modules java.base/jdk.internal.misc
  * @library /test/lib /
  * @run driver compiler.c2.irTests.TestVectorizationNotRun

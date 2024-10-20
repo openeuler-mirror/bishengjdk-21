@@ -22,12 +22,6 @@
  *
  */
 
-/*
- * This file has been modified by Loongson Technology in 2022, These
- * modifications are Copyright (c) 2019, 2022, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
 package sun.jvm.hotspot.debugger.remote;
 
 import java.rmi.*;
@@ -39,7 +33,6 @@ import sun.jvm.hotspot.debugger.cdbg.*;
 import sun.jvm.hotspot.debugger.remote.x86.*;
 import sun.jvm.hotspot.debugger.remote.amd64.*;
 import sun.jvm.hotspot.debugger.remote.ppc64.*;
-import sun.jvm.hotspot.debugger.remote.loongarch64.*;
 
 /** An implementation of Debugger which wraps a
     RemoteDebugger, providing remote debugging via RMI.
@@ -68,10 +61,6 @@ public class RemoteDebuggerClient extends DebuggerBase implements JVMDebugger {
         threadFactory = new RemoteAMD64ThreadFactory(this);
       } else if (cpu.equals("ppc64")) {
         threadFactory = new RemotePPC64ThreadFactory(this);
-      } else if (cpu.equals("loongarch64")) {
-        threadFactory = new RemoteLOONGARCH64ThreadFactory(this);
-        cachePageSize = 4096;
-        cacheNumPages = parseCacheNumPagesProperty(cacheSize / cachePageSize);
       } else {
         try {
           Class tf = Class.forName("sun.jvm.hotspot.debugger.remote." +

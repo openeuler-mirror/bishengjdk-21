@@ -22,12 +22,6 @@
  */
 
 /*
- * This file has been modified by Loongson Technology in 2022, These
- * modifications are Copyright (c) 2021, 2022, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
-/*
  * @test ReservedStackTest
  *
  * @requires vm.opt.DeoptimizeALot != true
@@ -246,7 +240,7 @@ public class ReservedStackTest {
         return Platform.isAix() ||
             (Platform.isLinux() &&
              (Platform.isPPC() || Platform.isS390x() || Platform.isX64() ||
-              Platform.isX86() || Platform.isAArch64() || Platform.isRISCV64() || Platform.isLoongArch64())) ||
+              Platform.isX86() || Platform.isAArch64() || Platform.isRISCV64())) ||
             Platform.isOSX();
     }
 
