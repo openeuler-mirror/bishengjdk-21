@@ -22,12 +22,6 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-
-/*
- * This file has been modified by Loongson Technology in 2023, These
- * modifications are Copyright (c) 2022, 2023, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
 package jdk.internal.foreign.abi;
 
 import jdk.internal.access.JavaLangAccess;
@@ -39,7 +33,6 @@ import jdk.internal.foreign.abi.aarch64.linux.LinuxAArch64Linker;
 import jdk.internal.foreign.abi.aarch64.macos.MacOsAArch64Linker;
 import jdk.internal.foreign.abi.aarch64.windows.WindowsAArch64Linker;
 import jdk.internal.foreign.abi.fallback.FallbackLinker;
-import jdk.internal.foreign.abi.loongarch64.linux.LinuxLoongArch64Linker;
 import jdk.internal.foreign.abi.ppc64.linux.LinuxPPC64leLinker;
 import jdk.internal.foreign.abi.riscv64.linux.LinuxRISCV64Linker;
 import jdk.internal.foreign.abi.s390.linux.LinuxS390Linker;
@@ -251,7 +244,6 @@ public final class SharedUtils {
             case LINUX_PPC_64_LE -> LinuxPPC64leLinker.getInstance();
             case LINUX_RISCV_64 -> LinuxRISCV64Linker.getInstance();
             case LINUX_S390 -> LinuxS390Linker.getInstance();
-            case LINUX_LOONGARCH_64 -> LinuxLoongArch64Linker.getInstance();
             case FALLBACK -> FallbackLinker.getInstance();
             case UNSUPPORTED -> throw new UnsupportedOperationException("Platform does not support native linker");
         };

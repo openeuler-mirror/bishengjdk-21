@@ -22,12 +22,6 @@
  *
  */
 
-/*
- * This file has been modified by Loongson Technology in 2022, These
- * modifications are Copyright (c) 2022, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
 #ifndef SHARE_C1_C1_LIR_HPP
 #define SHARE_C1_C1_LIR_HPP
 
@@ -1459,18 +1453,15 @@ class LIR_OpConvert: public LIR_Op1 {
  private:
    Bytecodes::Code _bytecode;
    ConversionStub* _stub;
-   LIR_Opr _tmp;
 
  public:
-   LIR_OpConvert(Bytecodes::Code code, LIR_Opr opr, LIR_Opr result, ConversionStub* stub, LIR_Opr tmp)
+   LIR_OpConvert(Bytecodes::Code code, LIR_Opr opr, LIR_Opr result, ConversionStub* stub)
      : LIR_Op1(lir_convert, opr, result)
      , _bytecode(code)
-     , _stub(stub)
-     , _tmp(tmp)                                 {}
+     , _stub(stub)                               {}
 
   Bytecodes::Code bytecode() const               { return _bytecode; }
   ConversionStub* stub() const                   { return _stub; }
-  LIR_Opr tmp() const                            { return _tmp; }
 
   virtual void emit_code(LIR_Assembler* masm);
   virtual LIR_OpConvert* as_OpConvert() { return this; }
@@ -2106,7 +2097,7 @@ class LIR_List: public CompilationResourceObj {
   const char *  _file;
   int           _line;
 #endif
-#if defined(RISCV) || defined(LOONGARCH)
+#ifdef RISCV
   LIR_Opr       _cmp_opr1;
   LIR_Opr       _cmp_opr2;
 #endif
@@ -2122,7 +2113,7 @@ class LIR_List: public CompilationResourceObj {
     }
 #endif // PRODUCT
 
-#if defined(RISCV) || defined(LOONGARCH)
+#ifdef RISCV
     set_cmp_oprs(op);
     // lir_cmp set cmp oprs only on riscv
     if (op->code() == lir_cmp) return;
@@ -2144,7 +2135,7 @@ class LIR_List: public CompilationResourceObj {
   void set_file_and_line(const char * file, int line);
 #endif
 
-#if defined(RISCV) || defined(LOONGARCH)
+#ifdef RISCV
   void set_cmp_oprs(LIR_Op* op);
 #endif
 
@@ -2237,9 +2228,7 @@ class LIR_List: public CompilationResourceObj {
   void safepoint(LIR_Opr tmp, CodeEmitInfo* info)  { append(new LIR_Op1(lir_safepoint, tmp, info)); }
   void return_op(LIR_Opr result)                   { append(new LIR_OpReturn(result)); }
 
-  void convert(Bytecodes::Code code, LIR_Opr left, LIR_Opr dst, ConversionStub* stub = nullptr, LIR_Opr tmp = LIR_OprFact::illegalOpr) {
-    append(new LIR_OpConvert(code, left, dst, stub, tmp));
-  }
+  void convert(Bytecodes::Code code, LIR_Opr left, LIR_Opr dst, ConversionStub* stub = nullptr/*, bool is_32bit = false*/) { append(new LIR_OpConvert(code, left, dst, stub)); }
 
   void logical_and (LIR_Opr left, LIR_Opr right, LIR_Opr dst) { append(new LIR_Op2(lir_logic_and,  left, right, dst)); }
   void logical_or  (LIR_Opr left, LIR_Opr right, LIR_Opr dst) { append(new LIR_Op2(lir_logic_or,   left, right, dst)); }
@@ -2347,7 +2336,7 @@ class LIR_List: public CompilationResourceObj {
   void unsigned_shift_right(LIR_Opr value, int count, LIR_Opr dst) { unsigned_shift_right(value, LIR_OprFact::intConst(count), dst, LIR_OprFact::illegalOpr); }
 
   void lcmp2int(LIR_Opr left, LIR_Opr right, LIR_Opr dst)        { append(new LIR_Op2(lir_cmp_l2i,  left, right, dst)); }
-  void fcmp2int(LIR_Opr left, LIR_Opr right, LIR_Opr dst, bool is_unordered_less, LIR_Opr tmp = LIR_OprFact::illegalOpr);
+  void fcmp2int(LIR_Opr left, LIR_Opr right, LIR_Opr dst, bool is_unordered_less);
 
   void call_runtime_leaf(address routine, LIR_Opr tmp, LIR_Opr result, LIR_OprList* arguments) {
     append(new LIR_OpRTCall(routine, tmp, result, arguments));

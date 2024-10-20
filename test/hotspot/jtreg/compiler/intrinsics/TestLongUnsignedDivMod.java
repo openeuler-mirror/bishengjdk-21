@@ -21,16 +21,10 @@
  * questions.
  */
 
-/*
- * This file has been modified by Loongson Technology in 2023, These
- * modifications are Copyright (c) 2023, Loongson Technology, and are made
- * available on the same license terms set forth above.
- */
-
 /**
 * @test
 * @summary Test x86_64 intrinsic for divideUnsigned() and remainderUnsigned() methods for Long
-* @requires os.arch=="amd64" | os.arch=="x86_64" | os.arch=="loongarch64"
+* @requires os.arch=="amd64" | os.arch=="x86_64"
 * @library /test/lib /
 * @run driver compiler.intrinsics.TestLongUnsignedDivMod
 */
