@@ -105,7 +105,7 @@ class Dependencies: public ResourceObj {
   enum DepType {
     // _type is initially set to -1, to prevent "already at end" assert
     undefined_dependency = -1,
-    
+
     end_marker = 0,
 
     // An 'evol' dependency simply notes that the contents of the

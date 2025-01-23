@@ -57,11 +57,11 @@
  *
  */
 
- package compiler.arguments;
+package compiler.arguments;
 
- public class TestC1Globals {
- 
-     public static void main(String args[]) {
-         System.out.println("Passed");
-     }
- }
+public class TestC1Globals {
+
+    public static void main(String args[]) {
+        System.out.println("Passed");
+    }
+}

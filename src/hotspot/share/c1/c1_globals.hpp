@@ -279,7 +279,7 @@
   /* Therefore, we restrict this flag to at most 1MB.                    */ \
   develop(intx, NMethodSizeLimit, (64*K)*wordSize,                          \
           "Maximum size of a compiled method.")                             \
-          range(0, 1*M)                                                \
+          range(0, 1*M)                                                     \
                                                                             \
   develop(bool, TraceFPUStack, false,                                       \
           "Trace emulation of the FPU stack (intel only)")                  \
