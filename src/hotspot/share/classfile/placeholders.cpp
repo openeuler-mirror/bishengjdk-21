@@ -329,10 +329,10 @@ void PlaceholderEntry::print_on(outputStream* st) const {
   SeenThread::print_action_queue(loadInstanceThreadQ(), st);
   st->cr();
   st->print("superThreadQ threads:");
-  SeenThread::print_action_queue(loadInstanceThreadQ(), st);
+  SeenThread::print_action_queue(superThreadQ(), st);
   st->cr();
   st->print("defineThreadQ threads:");
-  SeenThread::print_action_queue(loadInstanceThreadQ(), st);
+  SeenThread::print_action_queue(defineThreadQ(), st);
   st->cr();
 }
 
