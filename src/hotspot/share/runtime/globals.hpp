@@ -1959,6 +1959,10 @@ const int ObjectAlignmentInBytes = 8;
   JFR_ONLY(product(ccstr, StartFlightRecording, nullptr,                    \
           "Start flight recording with options"))                           \
                                                                             \
+  product(bool, UseFastSerializer, false, EXPERIMENTAL,                     \
+          "Cache-based serialization.It is extremely fast, but it"          \
+          "can only be effective in certain scenarios.")                    \
+                                                                            \
   product(bool, UseFastUnorderedTimeStamps, false, EXPERIMENTAL,            \
           "Use platform unstable time where supported for timestamps only") \
                                                                             \
