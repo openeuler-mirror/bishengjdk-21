@@ -263,6 +263,16 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseVectorizedMismatchIntrinsic, false);
   }
 
+  if (UnlockExperimentalVMOptions && UseHashMapIntegerCache && !FLAG_IS_DEFAULT(UseHashMapIntegerCache)) {
+    FLAG_SET_DEFAULT(UseHashMapIntegerCache, false);
+    warning("HashMap optimization is not supported in this VM.");
+  }
+
+  if (UnlockExperimentalVMOptions && UseFastSerializer && !FLAG_IS_DEFAULT(UseFastSerializer)) {
+    FLAG_SET_DEFAULT(UseFastSerializer, false);
+    warning("Serializer optimization is not supported in this VM.");
+  }
+
 #ifdef COMPILER2
   // C2 is only supported on v7+ VFP at this time
   if (_arm_arch < 7 || !has_vfp()) {

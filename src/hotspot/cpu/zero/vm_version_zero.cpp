@@ -71,6 +71,16 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseFMA, false);
   }
 
+  if (UnlockExperimentalVMOptions && UseHashMapIntegerCache && !FLAG_IS_DEFAULT(UseHashMapIntegerCache)) {
+    FLAG_SET_DEFAULT(UseHashMapIntegerCache, false);
+    warning("HashMap optimization is not supported in this VM.");
+  }
+
+  if (UnlockExperimentalVMOptions && UseFastSerializer && !FLAG_IS_DEFAULT(UseFastSerializer)) {
+    FLAG_SET_DEFAULT(UseFastSerializer, false);
+    warning("Serializer optimization is not supported in this VM.");
+  }
+
   if (UseMD5Intrinsics) {
     warning("MD5 intrinsics are not available on this CPU");
     FLAG_SET_DEFAULT(UseMD5Intrinsics, false);

@@ -1966,6 +1966,11 @@ const int ObjectAlignmentInBytes = 8;
   product(bool, UseFastUnorderedTimeStamps, false, EXPERIMENTAL,            \
           "Use platform unstable time where supported for timestamps only") \
                                                                             \
+  product(bool, UseHashMapIntegerCache, false, EXPERIMENTAL,                \
+          "The integer cache is an array of references to objects of"       \
+          "the HashMap Value type, indexed by the unboxed int key value."   \
+          "faster in execution, higher in memory consumption.")             \
+                                                                            \
   product(bool, UseEmptySlotsInSupers, true,                                \
                 "Allow allocating fields in empty slots of super-classes")  \
                                                                             \
