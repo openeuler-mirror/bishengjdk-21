@@ -31,6 +31,9 @@
 #include "gc/shared/tlab_globals.hpp"
 #include "runtime/flags/debug_globals.hpp"
 #include "runtime/globals.hpp"
+#if INCLUDE_JBOLT
+#include "jbolt/jbolt_globals.hpp"
+#endif // INCLUDE_JBOLT
 
 // Put LP64/ARCH/JVMCI/COMPILER1/COMPILER2 at the top,
 // as they are processed by jvmFlag.cpp in that order.
@@ -148,7 +151,17 @@
     product_pd,               \
     notproduct,               \
     range,                    \
-    constraint)
+    constraint)               \
+                              \
+  JBOLT_ONLY(                 \
+      JBOLT_FLAGS(            \
+    develop,                  \
+    develop_pd,               \
+    product,                  \
+    product_pd,               \
+    notproduct,               \
+    range,                    \
+    constraint))
 
 #define ALL_CONSTRAINTS(f) \
   COMPILER_CONSTRAINTS(f)  \

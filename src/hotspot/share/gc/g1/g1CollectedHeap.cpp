@@ -116,6 +116,9 @@
 #include "utilities/bitMap.inline.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/stack.inline.hpp"
+#if INCLUDE_JBOLT
+#include "jbolt/jBoltManager.hpp"
+#endif // INCLUDE_JBOLT
 
 size_t G1CollectedHeap::_humongous_object_threshold_in_words = 0;
 
@@ -1645,6 +1648,11 @@ size_t G1CollectedHeap::recalculate_used() const {
 }
 
 bool  G1CollectedHeap::is_user_requested_concurrent_full_gc(GCCause::Cause cause) {
+#if INCLUDE_JBOLT
+  if (UseJBolt && cause == GCCause::_java_lang_system_gc && JBoltManager::gc_should_sweep_code_heaps_now()) {
+    return true;
+  }
+#endif // INCLUDE_JBOLT
   return GCCause::is_user_requested_gc(cause) && ExplicitGCInvokesConcurrent;
 }
 
