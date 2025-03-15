@@ -131,6 +131,8 @@ public class Field {
   private Symbol          genericSignature;
   private AccessFlags     accessFlags;
   private int             fieldIndex;
+  // java field redact annotation
+  private U1Array         fieldAnnotations;
 
   /** Returns the byte offset of the field within the object or klass */
   public long getOffset() { return offset; }
@@ -181,6 +183,14 @@ public class Field {
 
   public boolean hasInitialValue()           { return holder.getFieldInitialValueIndex(fieldIndex) != 0;    }
   public int getInitialValueIndex()        { return values.initialValueIndex; }
+
+  public void setFieldAnnotations(U1Array fieldAnnotations){
+    this.fieldAnnotations = fieldAnnotations;
+  }
+
+  public U1Array getFieldAnnotations(){
+    return fieldAnnotations;
+  }
 
   //
   // Following accessors are for named, non-VM fields only

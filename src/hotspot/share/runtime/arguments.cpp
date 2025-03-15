@@ -58,6 +58,7 @@
 #include "runtime/vm_version.hpp"
 #include "services/management.hpp"
 #include "services/nmtCommon.hpp"
+#include "services/heapRedactor.hpp"
 #include "utilities/align.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/defaultStream.hpp"
@@ -3690,6 +3691,29 @@ jint Arguments::match_special_option_and_act(const JavaVMInitArgs* args,
       JVMFlag::printFlags(tty, false);
       vm_exit(0);
     }
+
+    if (match_option(option, "-XX:HeapDumpRedact", &tail)) {
+      // HeapDumpRedact arguments.
+      if (!HeapRedactor::check_launcher_heapdump_redact_support(tail)) {
+        warning("Heap dump redacting did not setup properly, using wrong argument?");
+        vm_exit_during_initialization("Syntax error, expecting -XX:HeapDumpRedact=[off|names|basic|full|diyrules|annotation]",NULL);
+      }
+      continue;
+    }
+
+    // heapDump redact password
+    if(match_option(option, "-XX:RedactPassword=", &tail)) {
+      if(tail == NULL || strlen(tail) == 0) {
+        VerifyRedactPassword = false;
+      } else {
+        char* split_char = strstr(const_cast<char*>(tail), ",");
+        VerifyRedactPassword = !(split_char == NULL || strlen(split_char) < SALT_LEN);
+      }
+      if(!VerifyRedactPassword) {
+        jio_fprintf(defaultStream::output_stream(), "redact password is null or with bad format, disable verify heap dump authority.\n");
+      }
+    }
+
 
 #ifndef PRODUCT
     if (match_option(option, "-XX:+PrintFlagsWithComments")) {
