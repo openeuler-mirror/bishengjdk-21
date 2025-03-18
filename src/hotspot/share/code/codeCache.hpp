@@ -48,6 +48,10 @@
 //    executed at level 2 or 3
 //  - Non-Profiled nmethods: nmethods that are not profiled, i.e., those
 //    executed at level 1 or 4 and native methods
+//  - JBolt nmethods: sorted non-profiled nmethods that are judged to be hot
+//    by JBolt
+//  - JBolt tmp nmethods: non-profiled nmethods that are judged to be hot by
+//    JBolt but not sorted yet
 //  - All: Used for code of all types if code cache segmentation is disabled.
 //
 // In the rare case of the non-nmethod code heap getting full, non-nmethod code
@@ -87,6 +91,10 @@ class CodeCache : AllStatic {
   friend class WhiteBox;
   friend class CodeCacheLoader;
   friend class ShenandoahParallelCodeHeapIterator;
+#if INCLUDE_JBOLT
+  friend class JBoltManager;
+#endif // INCLUDE_JBOLT
+
  private:
   // CodeHeaps of the cache
   static GrowableArray<CodeHeap*>* _heaps;
@@ -266,12 +274,16 @@ class CodeCache : AllStatic {
   }
 
   static bool code_blob_type_accepts_compiled(CodeBlobType code_blob_type) {
-    bool result = code_blob_type == CodeBlobType::All || code_blob_type <= CodeBlobType::MethodProfiled;
+    // Modified `type <= CodeBlobType::MethodProfiled` to `type < CodeBlobType::NonNMethod`
+    // after adding the JBolt heap. The two logics are still equivalent even without JBolt.
+    bool result = code_blob_type == CodeBlobType::All || code_blob_type < CodeBlobType::NonNMethod;
     return result;
   }
 
   static bool code_blob_type_accepts_nmethod(CodeBlobType type) {
-    return type == CodeBlobType::All || type <= CodeBlobType::MethodProfiled;
+    // Modified `type <= CodeBlobType::MethodProfiled` to `type < CodeBlobType::NonNMethod`
+    // after adding the JBolt heap. The two logics are still equivalent even without JBolt.
+    return type == CodeBlobType::All || type < CodeBlobType::NonNMethod;
   }
 
   static bool code_blob_type_accepts_allocable(CodeBlobType type) {

@@ -139,6 +139,7 @@ class os::Linux {
   static const char *libc_version()           { return _libc_version; }
   static const char *libpthread_version()     { return _libpthread_version; }
 
+  static void load_plugin_library();
   static void libpthread_init();
   static void sched_getcpu_init();
   static bool libnuma_init();
@@ -214,6 +215,27 @@ class os::Linux {
   typedef void (*numa_set_bind_policy_func_t)(int policy);
   typedef int (*numa_bitmask_isbitset_func_t)(struct bitmask *bmp, unsigned int n);
   typedef int (*numa_distance_func_t)(int node1, int node2);
+#if INCLUDE_JBOLT
+  typedef void (*jboltLog_precalc_t)(unsigned int topFrameIndex, unsigned int &max_frames);
+  typedef bool (*jboltLog_do_t)(uintptr_t related_data[], address stacktrace, unsigned int i, int comp_level, address new_func, address *tempfunc);
+  typedef int (*jboltMerge_judge_t)(uintptr_t data_layout[], int candidate, address clusters, address merged, address cluster);
+  static jboltLog_precalc_t _jboltLog_precalc;
+  static jboltLog_do_t _jboltLog_do;
+  static jboltMerge_judge_t _jboltMerge_judge;
+#endif
+
+  typedef void* (*heap_dict_add_t)(void* key, void* val, void* heap_dict, uint8_t type);
+  typedef void* (*heap_dict_lookup_t)(void* key, void* heap_dict, bool deletable);
+  typedef void (*heap_dict_free_t)(void* heap_dict, bool is_nested);
+  typedef void* (*heap_vector_add_t)(void* val, void* heap_vector, bool &_inserted);
+  typedef void* (*heap_vector_get_next_t)(void* heap_vector, void* heap_vector_node, int &_cnt, void** &_items);
+  typedef void (*heap_vector_free_t)(void* heap_vector);
+  static heap_dict_add_t _heap_dict_add;
+  static heap_dict_lookup_t _heap_dict_lookup;
+  static heap_dict_free_t _heap_dict_free;
+  static heap_vector_add_t _heap_vector_add;
+  static heap_vector_get_next_t _heap_vector_get_next;
+  static heap_vector_free_t _heap_vector_free;
 
   static sched_getcpu_func_t _sched_getcpu;
   static numa_node_to_cpus_func_t _numa_node_to_cpus;
@@ -431,6 +453,66 @@ class os::Linux {
   // otherwise does nothing and returns -2.
   static int malloc_info(FILE* stream);
 #endif // GLIBC
+
+#if INCLUDE_JBOLT
+  static void jboltLog_precalc(unsigned int topFrameIndex, unsigned int &max_frames) {
+    if (_jboltLog_precalc != nullptr) {
+      _jboltLog_precalc(topFrameIndex, max_frames);
+    }
+  }
+  static bool jboltLog_do(uintptr_t related_data[], address stacktrace, unsigned int i, int comp_level, address new_func, address *tempfunc) {
+    if (_jboltLog_do != nullptr) {
+      return _jboltLog_do(related_data, stacktrace, i, comp_level, new_func, tempfunc);
+    }
+    return false;
+  }
+  static int jboltMerge_judge(uintptr_t data_layout[], int candidate, address clusters, address merged, address cluster) {
+    if (_jboltMerge_judge != nullptr) {
+      return _jboltMerge_judge(data_layout, candidate, clusters, merged, cluster);
+    }
+    return -1;
+  }
+#endif // INCLUDE_JBOLT
+
+  static void* heap_dict_add(void* key, void* val, void* heap_dict, uint8_t type) {
+      if(_heap_dict_add == NULL) {
+          return NULL;
+      }
+      return _heap_dict_add(key, val, heap_dict, type);
+  }
+
+  static void* heap_dict_lookup(void* key, void* heap_dict, bool deletable) {
+      if(_heap_dict_lookup == NULL) {
+          return NULL;
+      }
+      return _heap_dict_lookup(key, heap_dict, deletable);
+  };
+
+  static void heap_dict_free(void* heap_dict, bool is_nested) {
+      if(_heap_dict_free != NULL) {
+          _heap_dict_free(heap_dict, is_nested);
+      }
+  }
+
+  static void* heap_vector_add(void* val, void* heap_vector, bool &_inserted) {
+      if(_heap_vector_add == NULL) {
+          return NULL;
+      }
+     return _heap_vector_add(val, heap_vector, _inserted);
+  }
+  
+  static void* heap_vector_get_next(void* heap_vector, void* heap_vector_node, int &_cnt, void** &_items) {
+      if(_heap_vector_get_next == NULL) {
+          return NULL;
+      }
+      return _heap_vector_get_next(heap_vector, heap_vector_node, _cnt, _items);
+  }
+
+  static void heap_vector_free(void* heap_vector) {
+      if(_heap_vector_free != NULL) {
+          _heap_vector_free(heap_vector);
+      }
+  }
 };
 
 #endif // OS_LINUX_OS_LINUX_HPP

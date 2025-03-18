@@ -1200,6 +1200,18 @@ void VM_Version::get_processor_features() {
   }
 
 #ifdef _LP64
+  if (UnlockExperimentalVMOptions && UseFastSerializer && !FLAG_IS_DEFAULT(UseFastSerializer)) {
+     FLAG_SET_DEFAULT(UseFastSerializer, false);
+     warning("Serializer optimization is not supported in this VM.");
+  }
+  if (UnlockExperimentalVMOptions && UseHashMapIntegerCache && !FLAG_IS_DEFAULT(UseHashMapIntegerCache)) {
+    FLAG_SET_DEFAULT(UseHashMapIntegerCache, false);
+    warning("HashMap optimization is not supported in this VM.");
+  }
+
+#endif
+
+#ifdef _LP64
   // These are only supported on 64-bit
   if (UseSHA && supports_avx2() && supports_bmi2()) {
     if (FLAG_IS_DEFAULT(UseSHA512Intrinsics)) {

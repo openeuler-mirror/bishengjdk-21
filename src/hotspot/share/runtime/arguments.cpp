@@ -58,6 +58,7 @@
 #include "runtime/vm_version.hpp"
 #include "services/management.hpp"
 #include "services/nmtCommon.hpp"
+#include "services/heapRedactor.hpp"
 #include "utilities/align.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/defaultStream.hpp"
@@ -2551,6 +2552,15 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args, bool* patch_m
     // -D
     } else if (match_option(option, "-D", &tail)) {
       const char* value;
+#ifndef AARCH64
+      if (match_option(option, "-DGZIP_USE_KAE=", &value)) {
+        if (strcmp(value, "true") == 0) {
+          jio_fprintf(defaultStream::output_stream(),
+            "-DGZIP_USE_KAE is not supported. This system propertiy is valid only on aarch64 architecture machines.\n"
+            "The compression action is performed using the native compression capability of the JDK.\n");
+        }
+      }
+#endif
       if (match_option(option, "-Djava.endorsed.dirs=", &value) &&
             *value!= '\0' && strcmp(value, "\"\"") != 0) {
         // abort if -Djava.endorsed.dirs is set
@@ -3681,6 +3691,29 @@ jint Arguments::match_special_option_and_act(const JavaVMInitArgs* args,
       JVMFlag::printFlags(tty, false);
       vm_exit(0);
     }
+
+    if (match_option(option, "-XX:HeapDumpRedact", &tail)) {
+      // HeapDumpRedact arguments.
+      if (!HeapRedactor::check_launcher_heapdump_redact_support(tail)) {
+        warning("Heap dump redacting did not setup properly, using wrong argument?");
+        vm_exit_during_initialization("Syntax error, expecting -XX:HeapDumpRedact=[off|names|basic|full|diyrules|annotation]",NULL);
+      }
+      continue;
+    }
+
+    // heapDump redact password
+    if(match_option(option, "-XX:RedactPassword=", &tail)) {
+      if(tail == NULL || strlen(tail) == 0) {
+        VerifyRedactPassword = false;
+      } else {
+        char* split_char = strstr(const_cast<char*>(tail), ",");
+        VerifyRedactPassword = !(split_char == NULL || strlen(split_char) < SALT_LEN);
+      }
+      if(!VerifyRedactPassword) {
+        jio_fprintf(defaultStream::output_stream(), "redact password is null or with bad format, disable verify heap dump authority.\n");
+      }
+    }
+
 
 #ifndef PRODUCT
     if (match_option(option, "-XX:+PrintFlagsWithComments")) {

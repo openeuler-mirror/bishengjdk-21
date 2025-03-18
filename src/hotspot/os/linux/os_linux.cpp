@@ -4582,6 +4582,77 @@ void os::Linux::numa_init() {
   }
 }
 
+#if INCLUDE_JBOLT
+os::Linux::jboltLog_precalc_t os::Linux::_jboltLog_precalc;
+os::Linux::jboltLog_do_t os::Linux::_jboltLog_do;
+os::Linux::jboltMerge_judge_t os::Linux::_jboltMerge_judge;
+#endif // INCLUDE_JBOLT
+os::Linux::heap_dict_add_t os::Linux::_heap_dict_add;
+os::Linux::heap_dict_lookup_t os::Linux::_heap_dict_lookup;
+os::Linux::heap_dict_free_t os::Linux::_heap_dict_free;
+os::Linux::heap_vector_add_t os::Linux::_heap_vector_add;
+os::Linux::heap_vector_get_next_t os::Linux::_heap_vector_get_next;
+os::Linux::heap_vector_free_t os::Linux::_heap_vector_free;
+
+void os::Linux::load_plugin_library() {
+
+#if INCLUDE_JBOLT
+    _jboltLog_precalc = CAST_TO_FN_PTR(jboltLog_precalc_t, dlsym(RTLD_DEFAULT, "JBoltLog_PreCalc"));
+    _jboltLog_do = CAST_TO_FN_PTR(jboltLog_do_t, dlsym(RTLD_DEFAULT, "JBoltLog_DO"));
+    _jboltMerge_judge = CAST_TO_FN_PTR(jboltMerge_judge_t, dlsym(RTLD_DEFAULT, "JBoltMerge_Judge"));
+#endif // INCLUDE_JBOLT
+  _heap_dict_add = CAST_TO_FN_PTR(heap_dict_add_t, dlsym(RTLD_DEFAULT, "HeapDict_Add"));
+  _heap_dict_lookup = CAST_TO_FN_PTR(heap_dict_lookup_t, dlsym(RTLD_DEFAULT, "HeapDict_Lookup"));
+  _heap_dict_free = CAST_TO_FN_PTR(heap_dict_free_t, dlsym(RTLD_DEFAULT, "HeapDict_Free"));
+  _heap_vector_add = CAST_TO_FN_PTR(heap_vector_add_t, dlsym(RTLD_DEFAULT, "HeapVector_Add"));
+  _heap_vector_get_next = CAST_TO_FN_PTR(heap_vector_get_next_t, dlsym(RTLD_DEFAULT, "HeapVector_GetNext"));
+  _heap_vector_free= CAST_TO_FN_PTR(heap_vector_free_t, dlsym(RTLD_DEFAULT, "HeapVector_Free"));
+
+  char path[JVM_MAXPATHLEN];
+  char ebuf[1024];
+  void* handle = NULL;
+  if (os::dll_locate_lib(path, sizeof(path), Arguments::get_dll_dir(), "jvm21_Acc") ||
+        os::dll_locate_lib(path, sizeof(path), "/usr/lib64", "jvm21_Acc")) {
+    handle = dlopen(path, RTLD_LAZY);
+  }
+  if (handle != NULL) {
+#if INCLUDE_JBOLT
+    if (_jboltLog_precalc == NULL) {
+      _jboltLog_precalc = CAST_TO_FN_PTR(jboltLog_precalc_t, dlsym(handle, "JBoltLog_PreCalc"));
+    }
+    if (_jboltLog_do == NULL) {
+      _jboltLog_do = CAST_TO_FN_PTR(jboltLog_do_t, dlsym(handle, "JBoltLog_DO"));
+    }
+    if (_jboltMerge_judge == NULL) {
+      _jboltMerge_judge = CAST_TO_FN_PTR(jboltMerge_judge_t, dlsym(handle, "JBoltMerge_Judge"));
+    }
+#endif // INCLUDE_JBOLT
+
+    if(_heap_dict_add == NULL) {
+      _heap_dict_add = CAST_TO_FN_PTR(heap_dict_add_t, dlsym(handle, "HeapDict_Add"));
+    }
+    if(_heap_dict_lookup == NULL) {
+      _heap_dict_lookup = CAST_TO_FN_PTR(heap_dict_lookup_t, dlsym(handle, "HeapDict_Lookup"));
+    }
+    if(_heap_dict_free == NULL) {
+      _heap_dict_free = CAST_TO_FN_PTR(heap_dict_free_t, dlsym(handle, "HeapDict_Free"));
+    }
+    if(_heap_vector_add == NULL) {
+      _heap_vector_add = CAST_TO_FN_PTR(heap_vector_add_t, dlsym(handle, "HeapVector_Add"));
+    }
+    if(_heap_vector_get_next == NULL) {
+      _heap_vector_get_next = CAST_TO_FN_PTR(heap_vector_get_next_t, dlsym(handle, "HeapVector_GetNext"));
+    }
+    if(_heap_vector_free == NULL) {
+      _heap_vector_free= CAST_TO_FN_PTR(heap_vector_free_t, dlsym(handle, "HeapVector_Free"));
+    }
+  }
+
+  JBOLT_ONLY(log_debug(jbolt)("Plugin library for JBolt: %s %s %s", BOOL_TO_STR(_jboltLog_precalc != nullptr),
+                                                         BOOL_TO_STR(_jboltLog_do != nullptr),
+                                                         BOOL_TO_STR(_jboltMerge_judge != nullptr));)
+}
+
 #if defined(IA32) && !defined(ZERO)
 /*
  * Work-around (execute code at a high address) for broken NX emulation using CS limit,
@@ -4706,6 +4777,8 @@ jint os::init_2(void) {
   // Check if we need to adjust the stack size for glibc guard pages.
   init_adjust_stacksize_for_guard_pages();
 #endif
+
+  Linux::load_plugin_library();
 
   if (UseNUMA || UseNUMAInterleaving) {
     Linux::numa_init();
