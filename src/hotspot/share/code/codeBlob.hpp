@@ -48,8 +48,7 @@ enum class CodeBlobType {
   MethodJBoltTmp      = 3,    // Temporary storage of JBolt hot methods
   NonNMethod          = 4,    // Non-nmethods like Buffers, Adapters and Runtime Stubs
   All                 = 5,    // All types (No code cache segmentation)
-  AOT                 = 6,    // AOT methods
-  NumTypes            = 7     // Number of CodeBlobTypes
+  NumTypes            = 6     // Number of CodeBlobTypes
 };
 
 // CodeBlob - superclass for all entries in the CodeCache.

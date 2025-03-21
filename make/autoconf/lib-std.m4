@@ -47,7 +47,11 @@ AC_DEFUN_ONCE([LIB_SETUP_STD_LIBS],
   if test "x$OPENJDK_TARGET_OS" = xlinux; then
     # Test if stdc++ can be linked statically.
     AC_MSG_CHECKING([if static link of stdc++ is possible])
-    STATIC_STDCXX_FLAGS="-static-libstdc++ -static-libgcc"
+    if test "x$TOOLCHAIN_TYPE" = xclang && test "x$FLAGS_CPU_ARCH" = xarm; then
+      STATIC_STDCXX_FLAGS=""
+    else
+      STATIC_STDCXX_FLAGS="-static-libstdc++ -static-libgcc"
+    fi
     AC_LANG_PUSH(C++)
     OLD_LIBS="$LIBS"
     LIBS="$STATIC_STDCXX_FLAGS"

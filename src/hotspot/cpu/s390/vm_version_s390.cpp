@@ -272,6 +272,14 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseSHA, false);
   }
 
+  if (UnlockExperimentalVMOptions && UseHashMapIntegerCache && !FLAG_IS_DEFAULT(UseHashMapIntegerCache)) {
+    FLAG_SET_DEFAULT(UseHashMapIntegerCache, false);
+    warning("HashMap optimization is not supported in this VM.");
+  }
+  if (UnlockExperimentalVMOptions && UseFastSerializer && !FLAG_IS_DEFAULT(UseFastSerializer)) {
+     FLAG_SET_DEFAULT(UseFastSerializer, false);
+     warning("Serializer optimization is not supported in this VM.");
+  }
 #ifdef COMPILER2
   if (FLAG_IS_DEFAULT(UseMultiplyToLenIntrinsic)) {
     FLAG_SET_DEFAULT(UseMultiplyToLenIntrinsic, true);

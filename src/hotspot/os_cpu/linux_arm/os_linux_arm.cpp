@@ -90,8 +90,14 @@ enum {
 #endif
 
 address os::current_stack_pointer() {
-  register address sp __asm__ (SPELL_REG_SP);
-  return sp;
+  #if defined(__clang__) || defined(__llvm__)
+    void *sp;
+    __asm__("mov %0, " SPELL_REG_SP : "=r"(sp));
+    return (address) sp;
+  #else
+    register address sp __asm__ (SPELL_REG_SP);
+    return sp;
+  #endif
 }
 
 char* os::non_memory_address_word() {
@@ -99,7 +105,7 @@ char* os::non_memory_address_word() {
   return (char*) -1;
 }
 
-
+#ifndef __arm__
 #if NGREG == 16
 // These definitions are based on the observation that until
 // the certain version of GCC mcontext_t was defined as
@@ -110,6 +116,7 @@ char* os::non_memory_address_word() {
 #define arm_sp gregs[13]
 #define arm_fp gregs[11]
 #define arm_r0 gregs[0]
+#endif
 #endif
 
 #define ARM_REGS_IN_CONTEXT  16

@@ -486,7 +486,7 @@ class os::Linux {
           return NULL;
       }
       return _heap_dict_lookup(key, heap_dict, deletable);
-  };
+  }
 
   static void heap_dict_free(void* heap_dict, bool is_nested) {
       if(_heap_dict_free != NULL) {

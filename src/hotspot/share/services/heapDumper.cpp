@@ -1053,7 +1053,7 @@ public:
   int field_count()             { return _entries; }
   char sig_start(int field_idx) { return _sigs_start.at(field_idx); }
   int offset(int field_idx)     { return _offsets.at(field_idx); }
-  address name_symbol_addrs(int field_idx) { return _name_symbol_addrs.at(field_idx); }
+  address name_symbol_addr(int field_idx) { return _name_symbol_addrs.at(field_idx); }
   u4 instance_size()            { return _instance_size; }
 };
 
@@ -1391,7 +1391,7 @@ void DumperSupport::dump_instance_redact_fields(AbstractDumpWriter* writer, oop 
       int offset = class_cache_entry->offset(idx);
 
       ResourceMark rm;
-      address field_adr = class_cache_entry->name_symbol_addrs(idx);
+      address field_adr = class_cache_entry->name_symbol_addr(idx);
       void* replace_value = writer->heapRedactor()->lookup_value(field_adr, replace_value_table, false);
 
       if (replace_value != nullptr) {
@@ -1560,7 +1560,7 @@ void DumperSupport::dump_redact_instance(AbstractDumpWriter* writer, oop o, Dump
 
     DumperClassCacheTableEntry* cache_entry = class_cache->lookup_or_create(ik);
 
-    u4 is = instance_size(ik);
+    u4 is = instance_size(ik, cache_entry);
     u4 size = 1 + sizeof(address) + 4 + sizeof(address) + 4 + is;
 
     writer->start_sub_record(HPROF_GC_INSTANCE_DUMP, size);

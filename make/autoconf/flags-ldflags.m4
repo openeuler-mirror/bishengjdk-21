@@ -73,8 +73,12 @@ AC_DEFUN([FLAGS_SETUP_LDFLAGS_HELPER],
     BASIC_LDFLAGS_JVM_ONLY=""
 
   elif test "x$TOOLCHAIN_TYPE" = xclang; then
-    BASIC_LDFLAGS_JVM_ONLY="-mno-omit-leaf-frame-pointer -mstack-alignment=16 \
+    if test "x$OPENJDK_TARGET_CPU" = xarm; then
+      BASIC_LDFLAGS_JVM_ONLY="-mno-omit-leaf-frame-pointer -fPIC"
+    else
+      BASIC_LDFLAGS_JVM_ONLY="-mno-omit-leaf-frame-pointer -mstack-alignment=16 \
         -fPIC"
+    fi
     if test "x$OPENJDK_TARGET_OS" = xaix; then
       BASIC_LDFLAGS="-Wl,-b64 -Wl,-brtl -Wl,-bnorwexec -Wl,-bnolibpath -Wl,-bnoexpall \
         -Wl,-bernotok -Wl,-bdatapsize:64k -Wl,-btextpsize:64k -Wl,-bstackpsize:64k"
@@ -171,7 +175,7 @@ AC_DEFUN([FLAGS_SETUP_LDFLAGS_CPU_DEP],
 [
   # Setup CPU-dependent basic LDFLAGS. These can differ between the target and
   # build toolchain.
-  if test "x$TOOLCHAIN_TYPE" = xgcc; then
+  if test "x$TOOLCHAIN_TYPE" = xgcc || test "x$TOOLCHAIN_TYPE" = xclang; then
     if test "x${OPENJDK_$1_CPU}" = xx86; then
       $1_CPU_LDFLAGS_JVM_ONLY="-march=i586"
     elif test "x$OPENJDK_$1_CPU" = xarm; then

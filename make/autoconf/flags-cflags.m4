@@ -599,6 +599,7 @@ AC_DEFUN([FLAGS_SETUP_CFLAGS_HELPER],
     # Restrict the debug information created by Clang to avoid
     # too big object files and speed the build up a little bit
     # (see http://llvm.org/bugs/show_bug.cgi?id=7554)
+    TOOLCHAIN_CFLAGS_JVM_ARM="$TOOLCHAIN_CFLAGS_JVM"
     TOOLCHAIN_CFLAGS_JVM="$TOOLCHAIN_CFLAGS_JVM -flimit-debug-info"
 
     # In principle the stack alignment below is cpu- and ABI-dependent and
@@ -616,6 +617,10 @@ AC_DEFUN([FLAGS_SETUP_CFLAGS_HELPER],
       fi
       TOOLCHAIN_CFLAGS_JDK="-pipe"
       TOOLCHAIN_CFLAGS_JDK_CONLY="-fno-strict-aliasing" # technically NOT for CXX
+    fi
+
+    if test "x$OPENJDK_TARGET_CPU" = xarm; then
+      TOOLCHAIN_CFLAGS_JVM="$TOOLCHAIN_CFLAGS_JVM_ARM -mno-omit-leaf-frame-pointer"
     fi
 
   elif test "x$TOOLCHAIN_TYPE" = xxlc; then
@@ -834,6 +839,10 @@ AC_DEFUN([FLAGS_SETUP_CFLAGS_CPU_DEP],
       if test "x$FLAGS_CPU_ARCH" != xarm &&  test "x$FLAGS_CPU_ARCH" != xppc; then
         # for all archs except arm and ppc, prevent gcc to omit frame pointer
         $1_CFLAGS_CPU_JDK="${$1_CFLAGS_CPU_JDK} -fno-omit-frame-pointer"
+      elif test "x$FLAGS_CPU_ARCH" = xarm; then
+        # -Wno-psabi to get rid of annoying "note: the mangling of 'va_list' has changed in GCC 4.4"
+        $1_CFLAGS_CPU="-fsigned-char -Wno-psabi $ARM_ARCH_TYPE_FLAGS $ARM_FLOAT_TYPE_FLAGS -DJDK_ARCH_ABI_PROP_NAME='\"\$(JDK_ARCH_ABI_PROP_NAME)\"'"
+        $1_CFLAGS_CPU_JVM="-DARM"
       fi
     fi
     if test "x$OPENJDK_TARGET_OS" = xaix; then
