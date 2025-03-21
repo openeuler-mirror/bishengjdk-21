@@ -343,7 +343,7 @@ public class JMap {
         String flag = "RedactPassword";
         try (InputStream in = hvm.printFlag(flag); BufferedInputStream bis = new BufferedInputStream(in);
             InputStreamReader isr = new InputStreamReader(bis, "UTF-8")) {
-            char c[] = new char[256];
+            char[] c = new char[256];
             int n;
             do {
                 n = isr.read(c);

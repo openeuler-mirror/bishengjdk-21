@@ -1591,11 +1591,11 @@ public class HeapHprofBinWriter extends AbstractHeapGraphWriter {
                     level == HeapRedactor.HeapDumpRedactLevel.REDACT_FULL);
               byte[] buf = null;
               if(shouldRedact) {
-                Optional<String> redactField = lookupRedactName(symbolStr);
-                buf = redactField.isPresent() ? redactField.get().getBytes("UTF-8") : null;
+                Optional<String> redactFiled = lookupRedactName(symbolStr);
+                buf = redactFiled.isPresent() ? redactFiled.get().getBytes("UTF-8") : null;
               }
               if(buf == null) {
-                buf = symbolStr.getBytes(UTF_8);
+                buf = symbolStr.getBytes("UTF-8");
               }
               writeHeader(HPROF_UTF8, buf.length + OBJ_ID_SIZE);
               writeSymbolID(sym);

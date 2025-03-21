@@ -389,7 +389,7 @@ void handleMessage
   (JNIEnv* env, jobject resultContainerObj, struct msghdr* msg,int read,
    jboolean isEOR, struct sockaddr* sap) {
     jobject isa, resultObj;
-    struct controlData cdata[1];
+    struct controlData cdata[1] = {0};
 
     if (read == 0) {
         /* we reached EOF */

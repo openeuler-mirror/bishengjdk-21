@@ -483,7 +483,11 @@ AC_DEFUN([TOOLCHAIN_EXTRACT_COMPILER_VERSION],
     if test $? -ne 0; then
       AC_MSG_NOTICE([The $COMPILER_NAME compiler (located as $COMPILER) does not seem to be the required $TOOLCHAIN_TYPE compiler.])
       AC_MSG_NOTICE([The result from running with --version was: "$COMPILER_VERSION_OUTPUT"])
-      AC_MSG_ERROR([A $TOOLCHAIN_TYPE compiler is required. Try setting --with-tools-dir.])
+      if test "x$OPENJDK_TARGET_CPU" = xarm; then
+        AC_MSG_NOTICE([A $TOOLCHAIN_TYPE compiler is required. Try setting --with-tools-dir.])
+      else
+        AC_MSG_ERROR([A $TOOLCHAIN_TYPE compiler is required. Try setting --with-tools-dir.])
+      fi
     fi
     # Collapse compiler output into a single line
     COMPILER_VERSION_STRING=`$ECHO $COMPILER_VERSION_OUTPUT`

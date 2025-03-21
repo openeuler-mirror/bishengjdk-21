@@ -795,6 +795,10 @@ define SetupNativeCompilationBody
   ifeq ($$($1_COMPILE_WITH_DEBUG_SYMBOLS), true)
     $1_EXTRA_CFLAGS += $$(CFLAGS_DEBUG_SYMBOLS)
     $1_EXTRA_CXXFLAGS += $$(CFLAGS_DEBUG_SYMBOLS)
+    ifeq ($(findstring $(OPENJDK_TARGET_CPU), arm), )
+      $1_EXTRA_CFLAGS := $(filter-out -gdwarf-aranges,$(1_EXTRA_CFLAGS))
+      $1_EXTRA_CXXFLAGS := $(filter-out -gdwarf-aranges,$(1_EXTRA_CXXFLAGS))
+    endif
     $1_EXTRA_ASFLAGS += $$(ASFLAGS_DEBUG_SYMBOLS)
   endif
 
@@ -900,8 +904,13 @@ define SetupNativeCompilationBody
           $1_PCH_FILE := $$($1_OBJECT_DIR)/precompiled/$$(notdir $$($1_PRECOMPILED_HEADER)).gch
           $1_USE_PCH_FLAGS := -I$$($1_OBJECT_DIR)/precompiled
         else ifeq ($(TOOLCHAIN_TYPE), clang)
-          $1_PCH_FILE := $$($1_OBJECT_DIR)/precompiled/$$(notdir $$($1_PRECOMPILED_HEADER)).pch
-          $1_USE_PCH_FLAGS := -include-pch $$($1_PCH_FILE)
+          ifeq ($(findstring $(OPENJDK_TARGET_CPU), arm), )
+            $1_PCH_FILE := $$($1_OBJECT_DIR)/precompiled/$$(notdir $$($1_PRECOMPILED_HEADER)).gch
+            $1_USE_PCH_FLAGS := -I$$($1_OBJECT_DIR)/precompiled
+          else
+            $1_PCH_FILE := $$($1_OBJECT_DIR)/precompiled/$$(notdir $$($1_PRECOMPILED_HEADER)).pch
+            $1_USE_PCH_FLAGS := -include-pch $$($1_PCH_FILE)
+          endif
         endif
         $1_PCH_DEPS_FILE := $$($1_PCH_FILE).d
         $1_PCH_DEPS_TARGETS_FILE := $$($1_PCH_FILE).d.targets
