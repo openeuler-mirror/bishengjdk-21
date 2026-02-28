@@ -62,4 +62,9 @@ public interface MachineDescription extends Serializable {
   default public boolean supports32bitAlignmentOf64bitTypes() {
     return false;
   }
+
+  /** Indicates whether the underlying machine is Aarch64 platform. */
+  default public boolean isAarch64() {
+    return false;
+  }
 }

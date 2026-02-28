@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -197,13 +197,31 @@ private:
 
   // Only perform a PerfData operation if the PerfData object has been
   // allocated and if the PerfDataManager has not freed the PerfData
-  // objects which can happen at normal VM shutdown.
-  //
+  // objects which can happen at normal VM shutdown. This operation is
+  // only safe when thread is not in safepoint-safe code, i.e. PerfDataManager
+  // could not reach the safepoint and free the counter while we are using it.
+  // If this is not guaranteed, use OM_PERFDATA_SAFE_OP instead.
   #define OM_PERFDATA_OP(f, op_str)                 \
     do {                                            \
-      if (ObjectMonitor::_sync_ ## f != nullptr &&  \
-          PerfDataManager::has_PerfData()) {        \
-        ObjectMonitor::_sync_ ## f->op_str;         \
+      if (ObjectMonitor::_sync_ ## f != nullptr) {  \
+        if (PerfDataManager::has_PerfData()) {      \
+          ObjectMonitor::_sync_ ## f->op_str;       \
+        }                                           \
+      }                                             \
+    } while (0)
+
+  // Only perform a PerfData operation if the PerfData object has been
+  // allocated and if the PerfDataManager has not freed the PerfData
+  // objects which can happen at normal VM shutdown. Additionally, we
+  // enter the critical section to resolve the race against PerfDataManager
+  // entering the safepoint and deleting the counter during shutdown.
+  #define OM_PERFDATA_SAFE_OP(f, op_str)            \
+    do {                                            \
+      if (ObjectMonitor::_sync_ ## f != nullptr) {  \
+        GlobalCounter::CriticalSection cs(Thread::current()); \
+        if (PerfDataManager::has_PerfData()) {      \
+          ObjectMonitor::_sync_ ## f->op_str;       \
+        }                                           \
       }                                             \
     } while (0)
 
@@ -217,6 +235,7 @@ private:
 
   static int Knob_SpinLimit;
 
+  static ByteSize header_offset()      { return byte_offset_of(ObjectMonitor, _header); }
   static ByteSize owner_offset()       { return byte_offset_of(ObjectMonitor, _owner); }
   static ByteSize recursions_offset()  { return byte_offset_of(ObjectMonitor, _recursions); }
   static ByteSize cxq_offset()         { return byte_offset_of(ObjectMonitor, _cxq); }
@@ -298,6 +317,7 @@ private:
   int       contentions() const;
   void      add_to_contentions(int value);
   intx      recursions() const                                         { return _recursions; }
+  void      set_recursions(size_t recursions);
 
   // JVM/TI GetObjectMonitorUsage() needs this:
   ObjectWaiter* first_waiter()                                         { return _WaitSet; }
@@ -332,6 +352,7 @@ private:
     void operator()(JavaThread* current);
   };
  public:
+  bool      enter_for(JavaThread* locking_thread);
   bool      enter(JavaThread* current);
   void      exit(JavaThread* current, bool not_suspended = true);
   void      wait(jlong millis, bool interruptible, TRAPS);

@@ -81,6 +81,9 @@ Thread::Thread() {
   DEBUG_ONLY(_current_resource_mark = nullptr;)
   set_handle_area(new (mtThread) HandleArea(nullptr));
   set_metadata_handles(new (mtClass) GrowableArray<Metadata*>(30, mtClass));
+#ifdef AARCH64
+  set_is_eager_class_loading_active(false);
+#endif
   set_last_handle_mark(nullptr);
   DEBUG_ONLY(_missed_ic_stub_refill_verifier = nullptr);
 
@@ -90,6 +93,9 @@ Thread::Thread() {
   _threads_list_ptr = nullptr;
   _nested_threads_hazard_ptr_cnt = 0;
   _rcu_counter = 0;
+#ifdef AARCH64
+  _super_class_resolution_depth = 0;
+#endif
 
   // the handle mark links itself to last_handle_mark
   new HandleMark(this);
@@ -235,6 +241,9 @@ void Thread::call_run() {
   // delete themselves when they terminate. But no thread should ever be deleted
   // asynchronously with respect to its termination - that is what _run_state can
   // be used to check.
+
+  // Logically we should do this->unregister_thread_stack_with_NMT() here, but we
+  // had to move that into post_run() because of the `this` deletion issue.
 
   assert(Thread::current_or_null() == nullptr, "current thread still present");
 }

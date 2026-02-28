@@ -88,6 +88,10 @@
 #if INCLUDE_JBOLT
 #include "jbolt/jBoltManager.hpp"
 #endif
+#ifdef AARCH64
+#include "jprofilecache/jitProfileCache.hpp"
+#include "jprofilecache/jitProfileRecord.hpp"
+#endif
 
 #ifdef DTRACE_ENABLED
 
@@ -633,6 +637,12 @@ nmethod* nmethod::new_nmethod(const methodHandle& method,
     // Safepoints in nmethod::verify aren't allowed because nm hasn't been installed yet.
     DEBUG_ONLY(nm->verify();)
     nm->log_new_nmethod();
+#ifdef AARCH64
+    if (JProfilingCacheRecording) {
+      int bci = nm->is_osr_method() ? nm->osr_entry_bci() : InvocationEntryBci;
+      JitProfileCache::instance()->recorder()->add_method(nm->method(), bci);
+    }
+#endif
   }
   return nm;
 }

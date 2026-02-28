@@ -100,6 +100,9 @@
 #if INCLUDE_JBOLT
 #include "jbolt/jBoltManager.hpp"
 #endif
+#ifdef AARCH64
+#include "jprofilecache/jitProfileCache.hpp"
+#endif
 
 GrowableArray<Method*>* collected_profiled_methods;
 
@@ -456,6 +459,13 @@ void before_exit(JavaThread* thread, bool halt) {
 
 
   // Actual shutdown logic begins here.
+
+#ifdef AARCH64
+  // flush jprofilecache
+  if (JProfilingCacheRecording && ExitVMProfileCacheFlush) {
+    JitProfileCache::instance()->flush_recorder();
+  }
+#endif
 
 #if INCLUDE_JVMCI
   if (EnableJVMCI) {

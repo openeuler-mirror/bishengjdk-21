@@ -50,6 +50,10 @@
 #if INCLUDE_JVMCI
 #include "jvmci/jvmci.hpp"
 #endif
+#ifdef AARCH64
+#include "java.hpp"
+#include "jprofilecache/jitProfileCache.hpp"
+#endif
 
 // Initialization done by VM thread in vm_init_globals()
 void check_ThreadShadow();
@@ -134,6 +138,16 @@ jint init_globals() {
   }
 #endif // LEAK_SANITIZER
 
+#ifdef AARCH64
+  if (JProfilingCacheRecording) {
+    JitProfileCache* jpc = JitProfileCache::create_instance();
+    jpc->init();
+    if (!jpc->is_valid()) {
+      vm_exit_during_initialization("[JitProfileCache] ERROR: init fail");
+    }
+  }
+#endif
+
   AsyncLogWriter::initialize();
   gc_barrier_stubs_init();   // depends on universe_init, must be before interpreter_init
   continuations_init();      // must precede continuation stub generation
@@ -143,6 +157,16 @@ jint init_globals() {
   InterfaceSupport_init();
   VMRegImpl::set_regName();  // need this before generate_stubs (for printing oop maps).
   SharedRuntime::generate_stubs();
+
+#ifdef AARCH64
+  if (JProfilingCacheCompileAdvance) {
+    JitProfileCache* jpc = JitProfileCache::create_instance();
+    jpc->init();
+    if (!jpc->is_valid()) {
+      vm_exit_during_initialization("[JitProfileCache] ERROR: init fail");
+    }
+  }
+#endif
   return JNI_OK;
 }
 

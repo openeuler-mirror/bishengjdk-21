@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -46,6 +46,7 @@ protected:
   static int _dcache_line_size;
   static int _icache_line_size;
   static int _initial_sve_vector_length;
+  static int _max_supported_sve_vector_length;
   static bool _rop_protection;
   static uintptr_t _pac_mask;
 
@@ -145,12 +146,20 @@ enum Ampere_CPU_Model {
   static bool supports_##name() { return (_features & CPU_##id) != 0; };
   CPU_FEATURE_FLAGS(CPU_FEATURE_DETECTION)
 #undef CPU_FEATURE_DETECTION
-
+  
+  static int get_cpu_model();
   static int cpu_family()                     { return _cpu; }
   static int cpu_model()                      { return _model; }
   static int cpu_model2()                     { return _model2; }
   static int cpu_variant()                    { return _variant; }
   static int cpu_revision()                   { return _revision; }
+
+  static bool is_hisi_enabled() {
+    if (_cpu == CPU_HISILICON && (_model == 0xd01 || _model == 0xd02)) {
+      return true;
+    }
+    return false;
+  }
 
   static bool model_is(int cpu_model) {
     return _model == cpu_model || _model2 == cpu_model;
@@ -164,10 +173,12 @@ enum Ampere_CPU_Model {
 
   static int icache_line_size() { return _icache_line_size; }
   static int dcache_line_size() { return _dcache_line_size; }
-  static int get_initial_sve_vector_length()  { return _initial_sve_vector_length; };
+  static int get_initial_sve_vector_length()        { return _initial_sve_vector_length; };
+  static int get_max_supported_sve_vector_length()  { return _max_supported_sve_vector_length; };
 
   static bool supports_fast_class_init_checks() { return true; }
   constexpr static bool supports_stack_watermark_barrier() { return true; }
+  constexpr static bool supports_recursive_lightweight_locking() { return true; }
 
   static void get_compatible_board(char *buf, int buflen);
 

@@ -203,6 +203,7 @@ void FileMapHeader::populate(FileMapInfo *info, size_t core_region_alignment,
   _core_region_alignment = core_region_alignment;
   _obj_alignment = ObjectAlignmentInBytes;
   _compact_strings = CompactStrings;
+  _compact_headers = AARCH64_ONLY(UseCompactObjectHeaders) NOT_AARCH64(false);
   if (DumpSharedSpaces && HeapShared::can_write()) {
     _narrow_oop_mode = CompressedOops::mode();
     _narrow_oop_base = CompressedOops::base();
@@ -281,6 +282,7 @@ void FileMapHeader::print(outputStream* st) {
   st->print_cr("- narrow_oop_base:                " INTPTR_FORMAT, p2i(_narrow_oop_base));
   st->print_cr("- narrow_oop_shift                %d", _narrow_oop_shift);
   st->print_cr("- compact_strings:                %d", _compact_strings);
+  st->print_cr("- compact_headers:                %d", _compact_headers);
   st->print_cr("- max_heap_size:                  " UINTX_FORMAT, _max_heap_size);
   st->print_cr("- narrow_oop_mode:                %d", _narrow_oop_mode);
   st->print_cr("- narrow_klass_shift:             %d", _narrow_klass_shift);
@@ -411,23 +413,25 @@ bool SharedClassPathEntry::validate(bool is_class_path) const {
       log_warning(cds)("directory is not empty: %s", name);
       ok = false;
     }
-  } else if ((has_timestamp() && _timestamp != st.st_mtime) ||
-             _filesize != st.st_size) {
-    ok = false;
-    if (PrintSharedArchiveAndExit) {
-      log_warning(cds)(_timestamp != st.st_mtime ?
-                                 "Timestamp mismatch" :
-                                 "File size mismatch");
-    } else {
-      const char* bad_jar_msg = "A jar file is not the one used while building the shared archive file:";
-      log_warning(cds)("%s %s", bad_jar_msg, name);
-      if (!log_is_enabled(Info, cds)) {
-        log_warning(cds)("%s %s", bad_jar_msg, name);
-      }
-      if (_timestamp != st.st_mtime) {
-        log_warning(cds)("%s timestamp has changed.", name);
+  } else {
+    bool size_differs = _filesize != st.st_size;
+    bool time_differs = has_timestamp() && _timestamp != st.st_mtime;
+    if (time_differs || size_differs) {
+      ok = false;
+      if (PrintSharedArchiveAndExit) {
+        log_warning(cds)(time_differs ? "Timestamp mismatch" : "File size mismatch");
       } else {
-        log_warning(cds)("%s size has changed.", name);
+        const char* bad_file_msg = "This file is not the one used while building the shared archive file:";
+        log_warning(cds)("%s %s", bad_file_msg, name);
+        if (!log_is_enabled(Info, cds)) {
+          log_warning(cds)("%s %s", bad_file_msg, name);
+        }
+        if (time_differs) {
+          log_warning(cds)("%s timestamp has changed.", name);
+        }
+        if (size_differs) {
+          log_warning(cds)("%s size has changed.", name);
+        }
       }
     }
   }
@@ -2093,8 +2097,10 @@ bool FileMapInfo::map_heap_region() {
     address heap_end = (address)heap_range.end();
     address mapped_heap_region_end = (address)_mapped_heap_memregion.end();
     assert(heap_end >= mapped_heap_region_end, "must be");
-    assert(heap_end - mapped_heap_region_end < (intx)(HeapRegion::GrainBytes),
+    if (!Universe::is_dynamic_max_heap_enable()) {
+      assert(heap_end - mapped_heap_region_end < (intx)(HeapRegion::GrainBytes),
            "must be at the top of the heap to avoid fragmentation");
+    }
 #endif
 
     ArchiveHeapLoader::set_mapped();
@@ -2113,6 +2119,9 @@ void FileMapInfo::init_heap_region_relocation() {
 
   address requested_bottom = (address)archive_range.start();
   address heap_end = (address)heap_range.end();
+  if (Universe::is_dynamic_max_heap_enable()) {
+    heap_end = (address)heap_range.start() + MaxHeapSize;
+  }
   assert(is_aligned(heap_end, HeapRegion::GrainBytes), "must be");
 
   // We map the archive heap region at the very top of the heap to avoid fragmentation.
@@ -2411,6 +2420,14 @@ bool FileMapHeader::validate() {
 
   if (! _use_secondary_supers_table && UseSecondarySupersTable) {
     log_warning(cds)("The shared archive was created without UseSecondarySupersTable.");
+    return false;
+  }
+
+  if (compact_headers() != AARCH64_ONLY(UseCompactObjectHeaders) NOT_AARCH64(false)) {
+    log_info(cds)("The shared archive file's UseCompactObjectHeaders setting (%s)"
+                  " does not equal the current UseCompactObjectHeaders setting (%s).",
+                  _compact_headers          ? "enabled" : "disabled",
+                  AARCH64_ONLY(UseCompactObjectHeaders   ? "enabled" : "disabled") NOT_AARCH64("disabled"));
     return false;
   }
 

@@ -35,6 +35,9 @@
 #include "runtime/handles.inline.hpp"
 #include "runtime/jniHandles.hpp"
 #include "runtime/mutexLocker.hpp"
+#ifdef AARCH64
+#include "jprofilecache/jitProfileCacheHolders.hpp"
+#endif
 
 CompileTask*  CompileTask::_task_free_list = nullptr;
 
@@ -123,6 +126,9 @@ void CompileTask::initialize(int compile_id,
   _nm_total_size = 0;
   _failure_reason = nullptr;
   _failure_reason_on_C_heap = false;
+#ifdef AARCH64
+  _is_jprofilecache_compilation = false;  // flag of compiileTask started by jitprofilecache
+#endif
 
   if (LogCompilation) {
     if (hot_method.not_null()) {

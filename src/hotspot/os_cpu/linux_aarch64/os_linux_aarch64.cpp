@@ -390,6 +390,374 @@ int os::extra_bang_size_in_bytes() {
 static inline void atomic_copy64(const volatile void *src, volatile void *dst) {
   *(jlong *) dst = *(const jlong *) src;
 }
+extern char** argv_for_execvp;
+
+void os::Linux::chose_numa_nodes() {
+  const char* numa_chosen_env = getenv("_JVM_NUMA_BINDING_DONE");
+  if (numa_chosen_env != NULL && strcmp(numa_chosen_env, "1") == 0) {
+    if (LogNUMANodes) {
+      warning("NUMA binding already done (detected via environment variable), skipping");
+    }
+    return;
+  }
+
+  if (NUMANodes == NULL && NUMANodesRandom == 0) {
+    return;
+  }
+
+  const int MAX_DISTANCE = 999999;
+
+  int nodes_num = Linux::numa_max_node() + 1;
+  const int MAXNODE = 100;
+  if (nodes_num <= 0 || nodes_num >= MAXNODE) {
+    warning("Invalid NUMA nodes number: %d", nodes_num);
+    return;
+  }
+
+  // Parse the NUMANodes
+  bool user_specified_nodes[MAXNODE] = {false};
+  bool has_user_constraint = false;
+
+  if (NUMANodes != NULL) {
+    if (LogNUMANodes) {
+      warning("NUMANodes parameter specified: %s", NUMANodes);
+    }
+
+    // Parse the nodestring
+    bitmask* user_nodes_mask = os::Linux::numa_parse_nodestring_all(NUMANodes);
+    if (user_nodes_mask != NULL) {
+      has_user_constraint = true;
+      for (int i = 0; i < nodes_num; i++) {
+        if (_numa_bitmask_isbitset(user_nodes_mask, i)) {
+          user_specified_nodes[i] = true;
+          if (LogNUMANodes) {
+            warning("User specified node %d is allowed", i);
+          }
+        }
+      }
+      os::Linux::numa_bitmask_free(user_nodes_mask);
+    } else {
+      if (LogNUMANodes) {
+        warning("Failed to parse NUMANodes: %s", NUMANodes);
+        warning("Skip NUMANodes parameter.");
+      }
+    }
+  }
+
+  // Save the original CPU mask specified by system(numactl)
+  cpu_set_t original_cpu_mask;
+  if (sched_getaffinity(0, sizeof(cpu_set_t), &original_cpu_mask) == -1) {
+    perror("sched_getaffinity");
+    return;
+  }
+
+  // Within the limit, count available cpus each NUMA node has
+  int cpu_count_per_node[MAXNODE] = {0};
+  bool node_has_cpu[MAXNODE] = {false};
+
+  int cpus_num = os::Linux::numa_num_configured_cpus();
+
+  // Traverse all cpus and count which cpus each Node has
+  for (int i = 0; i < cpus_num; i++) {
+    if (CPU_ISSET(i, &original_cpu_mask)) {
+      int node_id = _numa_node_of_cpu(i);
+      if (node_id == -1) {
+        if (LogNUMANodes) {
+          warning("Failed to get NUMA node for CPU %d", i);
+        }
+      } else if (node_id >= 0 && node_id < MAXNODE) {
+        node_has_cpu[node_id] = true;
+        cpu_count_per_node[node_id]++;
+        if (LogNUMANodes) {
+          warning("CPU %d belongs to Node %d", i, node_id);
+        }
+      }
+    }
+  }
+
+  // Build a list of available nodes
+  int available_nodes[MAXNODE];
+  int available_nodes_count = 0;
+  for (int i = 0; i < nodes_num; i++) {
+    if (node_has_cpu[i]) {
+      // Set the NUMANodes
+      if (has_user_constraint && !user_specified_nodes[i]) {
+        if (LogNUMANodes) {
+          warning("Node %d: has CPUs but excluded by NUMANodes parameter", i);
+        }
+        continue;
+      }
+
+      available_nodes[available_nodes_count++] = i;
+      if (LogNUMANodes) {
+        warning("Node %d: available, CPU count = %d", i, cpu_count_per_node[i]);
+      }
+    } else if (has_user_constraint && user_specified_nodes[i]) {
+      // Specified this node, but no available CPU under the system(numactl) limit
+      if (LogNUMANodes) {
+        warning("Node %d: specified in NUMANodes but has no available CPUs in numactl range", i);
+      }
+    }
+  }
+
+  if (available_nodes_count == 0) {
+    if (LogNUMANodes) {
+      if (has_user_constraint) {
+        warning("No available NUMA nodes found in NUMANodes range: %s", NUMANodes);
+      } else {
+        warning("No available NUMA nodes found");
+      }
+    }
+    return;
+  }
+
+  if (LogNUMANodes) {
+    warning("Total available nodes (after NUMANodes filter): %d", available_nodes_count);
+  }
+
+  // Check the memory binding permissions
+  bitmask * mem_allowed = _numa_get_mems_allowed();
+  if (!mem_allowed) {
+    if (LogNUMANodes) {
+      warning("Failed to get mems allowed");
+    }
+    return;
+  }
+
+  // Determine the number of nodes to be selected
+  int nodes_to_select = NUMANodesRandom;
+
+  // If NUMANodesRandom is not set or the value is invalid, use all available nodes
+  if (nodes_to_select <= 0 || nodes_to_select > available_nodes_count) {
+    nodes_to_select = available_nodes_count;
+  }
+
+  if (LogNUMANodes) {
+    if (has_user_constraint) {
+      warning("NUMANodes filter applied: %s, available nodes after filter: %d",
+              NUMANodes, available_nodes_count);
+    }
+    warning("NUMANodesRandom=%lu, will select %d nodes from %d available nodes",
+            NUMANodesRandom, nodes_to_select, available_nodes_count);
+  }
+
+  // Use PID as the random seed
+  int pid = getpid();
+  int start_index = pid % available_nodes_count;
+  int start_node = available_nodes[start_index];
+
+  // Check whether the starting node can be bound to memory
+  if (!(_numa_bitmask_isbitset(mem_allowed, start_node) &&
+        _numa_bitmask_isbitset(_numa_membind_bitmask, start_node))) {
+    // If the starting node is unavailable, find another one
+    start_node = -1;
+    for (int i = 0; i < available_nodes_count; i++) {
+      int node_id = available_nodes[i];
+      if (_numa_bitmask_isbitset(mem_allowed, node_id) &&
+          _numa_bitmask_isbitset(_numa_membind_bitmask, node_id)) {
+        start_node = node_id;
+        break;
+      }
+    }
+    if (start_node == -1) {
+      os::Linux::numa_bitmask_free(mem_allowed);
+      if (LogNUMANodes) {
+        warning("No bindable nodes found!");
+      }
+      return;
+    }
+  }
+
+  if (LogNUMANodes) {
+    warning("Start node: %d", start_node);
+  }
+
+  // Select nodes: Choose the nearest nodes_to_select node based on distance
+  int selected_nodes[MAXNODE];
+  int selected_count = 0;
+
+  // First node is the starting node
+  selected_nodes[selected_count++] = start_node;
+
+  if (nodes_to_select == 1) {
+    if (LogNUMANodes) {
+      warning("Selected node %d", start_node);
+    }
+  } else {
+    // Select by distance
+    bool node_selected[MAXNODE] = {false};
+    node_selected[start_node] = true;
+
+    // Select the nearest nodes
+    while (selected_count < nodes_to_select) {
+      int nearest_node = -1;
+      int min_total_distance = MAX_DISTANCE;
+
+      // Calculate the total distance from it to all selected nodes
+      for (int i = 0; i < available_nodes_count; i++) {
+        int candidate = available_nodes[i];
+
+        // Skip the selected nodes and the unbound nodes
+        if (node_selected[candidate]) continue;
+        if (!(_numa_bitmask_isbitset(mem_allowed, candidate) &&
+              _numa_bitmask_isbitset(_numa_membind_bitmask, candidate))) {
+          continue;
+        }
+
+        // Calculate the total distance from the candidate to all selected nodes
+        int total_distance = 0;
+        for (int j = 0; j < selected_count; j++) {
+          int selected = selected_nodes[j];
+          int dist = _numa_distance(candidate, selected);
+          total_distance += dist;
+          if (LogNUMANodes) {
+            warning("Distance from node %d to node %d: %d", candidate, selected, dist);
+          }
+        }
+
+        // Find the node with the smallest distance
+        if (total_distance < min_total_distance) {
+          min_total_distance = total_distance;
+          nearest_node = candidate;
+        }
+      }
+
+      // No more available nodes are found, exit
+      if (nearest_node == -1) {
+        if (LogNUMANodes) {
+          warning("No more bindable nodes available, selected %d nodes", selected_count);
+        }
+        break;
+      }
+
+      // Select the nearest node
+      selected_nodes[selected_count++] = nearest_node;
+      node_selected[nearest_node] = true;
+
+      if (LogNUMANodes) {
+        warning("Selected node %d (total distance: %d)", nearest_node, min_total_distance);
+      }
+    }
+  }
+
+  os::Linux::numa_bitmask_free(mem_allowed);
+
+  if (selected_count == 0) {
+    if (LogNUMANodes) {
+      warning("Cannot find proper nodes to bind!");
+    }
+    return;
+  }
+
+  if (LogNUMANodes) {
+    warning("Final selected nodes count: %d", selected_count);
+  }
+
+  // New CPU mask: only include the CPU on the selected node
+  cpu_set_t new_cpu_mask;
+  CPU_ZERO(&new_cpu_mask);
+
+  bitmask * node_cpumask = os::Linux::numa_allocate_cpumask();
+  if (!node_cpumask) {
+    if (LogNUMANodes) {
+      warning("Cannot allocate bitmask for cpus!");
+    }
+    return;
+  }
+
+  // Only retain the CPU on the selected node
+  for (int i = 0; i < selected_count; i++) {
+    int node_id = selected_nodes[i];
+
+    if (_numa_node_to_cpus_v2(node_id, node_cpumask) != 0) {
+      if (LogNUMANodes) {
+        warning("Failed to get CPUs for node %d", node_id);
+      }
+      continue;
+    }
+
+    // Key: Only add cpus that meet both of the following conditions:
+    // 1. Belongs to the selected Node
+    // 2. Within the original limits of system(numactl)
+    for (int cpu = 0; cpu < cpus_num; cpu++) {
+      if (_numa_bitmask_isbitset(node_cpumask, cpu) &&
+          CPU_ISSET(cpu, &original_cpu_mask)) {
+        CPU_SET(cpu, &new_cpu_mask);
+        if (LogNUMANodes) {
+          warning("Keeping CPU %d from node %d", cpu, node_id);
+        }
+      }
+    }
+  }
+
+  os::Linux::numa_bitmask_free(node_cpumask);
+
+  // Set the bit mask
+  char buf[256] = {0};
+  int buf_pos = 0;
+
+  for (int i = 0; i < selected_count; i++) {
+    if (i > 0) {
+      buf_pos += snprintf(buf + buf_pos, sizeof(buf) - buf_pos, ",");
+    }
+    buf_pos += snprintf(buf + buf_pos, sizeof(buf) - buf_pos, "%d", selected_nodes[i]);
+  }
+
+  bitmask* mask = numa_allocate_nodemask();
+  numa_bitmask_clearall(mask);
+  for (int i = 0; i < selected_count; i++) {
+    numa_bitmask_setbit(mask, selected_nodes[i]);  // Set the bit directly
+  }
+
+  if (os::Linux::numa_bitmask_equal(mask, os::Linux::_numa_membind_bitmask)) {
+    os::Linux::numa_bitmask_free(mask);
+    if (LogNUMANodes) {
+      warning("Mempolicy is not changed, param: %s", buf);
+    }
+    return;
+  }
+
+  // Set the NUMA memory binding
+  errno = 0;
+  os::Linux::numa_run_on_node_mask(mask);
+  if (errno) {
+    perror("numa_run_on_node_mask");
+  }
+
+  errno = 0;
+  os::Linux::numa_set_membind(mask);
+  int errtmp = errno;
+  os::Linux::numa_bitmask_free(mask);
+  if (errtmp) {
+    perror("numa_set_membind");
+  }
+
+  // New CPU affinity
+  if (sched_setaffinity(0, sizeof(cpu_set_t), &new_cpu_mask) == -1) {
+    perror("sched_setaffinity");
+    if (LogNUMANodes) {
+      warning("Failed to set CPU affinity");
+    }
+    return;
+  }
+
+  if (LogNUMANodes) {
+    warning("Successfully bound to %d node(s): %s", selected_count, buf);
+    warning("Final available CPUs:");
+    for (int cpu = 0; cpu < cpus_num; cpu++) {
+      if (CPU_ISSET(cpu, &new_cpu_mask)) {
+        warning("  CPU %d", cpu);
+      }
+    }
+  }
+
+  setenv("_JVM_NUMA_BINDING_DONE", "1", 1);
+
+  execvp(*argv_for_execvp, argv_for_execvp);
+
+  // If execvp fails, perror will be executed
+  perror("execvp failed");
+}
 
 extern "C" {
   int SpinPause() {

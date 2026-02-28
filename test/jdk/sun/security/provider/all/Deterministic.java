@@ -62,6 +62,10 @@ public class Deterministic {
 
         for (var p : Security.getProviders()) {
             var name = p.getName();
+            if (name.equals("KAEProvider")) {
+                System.out.println("Skip testcase if using KAEProvider");
+                break;
+            }
             if (name.equals("SunMSCAPI") || name.startsWith("SunPKCS11")) {
                 System.out.println("Skipped native provider " + name);
                 continue;

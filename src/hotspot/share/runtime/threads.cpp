@@ -58,7 +58,9 @@
 #include "oops/symbol.hpp"
 #include "prims/jvmtiAgentList.hpp"
 #include "prims/jvm_misc.hpp"
+#if defined(AARCH64) || defined(AMD64)
 #include "prims/upcallLinker.hpp"
+#endif // AARCH64 || AMD64
 #include "runtime/arguments.hpp"
 #include "runtime/fieldDescriptor.inline.hpp"
 #include "runtime/flags/jvmFlagLimit.hpp"
@@ -118,6 +120,10 @@
 #include "jbolt/jBoltDcmds.hpp"
 #include "jbolt/jBoltManager.hpp"
 #endif // INCLUDE_JBOLT
+#ifdef AARCH64
+#include "jprofilecache/jitProfileCache.hpp"
+#include "jprofilecache/jitProfileCacheThread.hpp"
+#endif
 
 // Initialization after module runtime initialization
 void universe_post_module_init();  // must happen after call_initPhase2
@@ -438,9 +444,11 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // Initialize library-based TLS
   ThreadLocalStorage::init();
 
+#if defined(AARCH64) || defined(AMD64)
   // Initialize ThreadLocalUpCall
   ThreadLocalUpCall::init();
 
+#endif // AARCH64 || AMD64
   // Initialize the output stream module
   ostream_init();
 
@@ -824,6 +832,16 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   StatSampler::engage();
   if (CheckJNICalls)                  JniPeriodicChecker::engage();
 
+#ifdef AARCH64
+  if (JProfilingCacheCompileAdvance) {
+    JitProfileCache* jprofilecache = JitProfileCache::instance();
+    assert(jprofilecache != nullptr, "sanity check");
+    jprofilecache->preloader()->jvm_booted_is_done();
+    JitProfileCacheThread::launch_with_delay(JProfilingCacheDelayLoadTime, THREAD);
+    // register_jprofilecache_dcmds();
+  }
+#endif
+
 #if INCLUDE_RTM_OPT
   RTMLockingCounters::init();
 #endif
@@ -857,6 +875,15 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
     JBoltManager::init_phase2(CATCH);
   }
 #endif // INCLUDE_JBOLT
+
+  // Dynamic Max Heap: reset heap initial size to MaxHeapSize
+  if (Universe::is_dynamic_max_heap_enable()) {
+    bool success = Universe::heap()->change_max_heap(MaxHeapSize);
+    if (!success) {
+      log_error(dynamic, heap)("VM failed to initialize heap to Xmx " SIZE_FORMAT "K", (MaxHeapSize / K));
+      vm_exit(1);
+    }
+  }
 
   return JNI_OK;
 }

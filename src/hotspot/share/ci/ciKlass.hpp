@@ -129,6 +129,11 @@ public:
   void print_name_on(outputStream* st);
 
   const char* external_name() const;
+
+  juint prototype_header_offset();
+#ifdef AARCH64
+  uintptr_t prototype_header();
+#endif
 };
 
 #endif // SHARE_CI_CIKLASS_HPP

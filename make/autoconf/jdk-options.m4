@@ -483,6 +483,31 @@ AC_DEFUN_ONCE([JDKOPT_SETUP_ADDRESS_SANITIZER],
 
 ###############################################################################
 #
+# Static analyzer
+#
+AC_DEFUN_ONCE([JDKOPT_SETUP_STATIC_ANALYZER],
+[
+  UTIL_ARG_ENABLE(NAME: static-analyzer, DEFAULT: false, RESULT: STATIC_ANALYZER_ENABLED,
+      DESC: [enable the GCC static analyzer],
+      CHECK_AVAILABLE: [
+        AC_MSG_CHECKING([if static analyzer is available])
+        if test "x$TOOLCHAIN_TYPE" = "xgcc"; then
+          AC_MSG_RESULT([yes])
+        else
+          AC_MSG_RESULT([no])
+          AVAILABLE=false
+        fi
+      ],
+      IF_ENABLED: [
+        STATIC_ANALYZER_CFLAGS="-fanalyzer -Wno-analyzer-fd-leak"
+        CFLAGS_JDKLIB="$CFLAGS_JDKLIB $STATIC_ANALYZER_CFLAGS"
+        CFLAGS_JDKEXE="$CFLAGS_JDKEXE $STATIC_ANALYZER_CFLAGS"
+      ])
+  AC_SUBST(STATIC_ANALYZER_ENABLED)
+])
+
+################################################################################
+#
 # LeakSanitizer
 #
 AC_DEFUN_ONCE([JDKOPT_SETUP_LEAK_SANITIZER],
@@ -702,6 +727,32 @@ AC_DEFUN([JDKOPT_ENABLE_DISABLE_CDS_ARCHIVE],
         fi
       ])
   AC_SUBST(BUILD_CDS_ARCHIVE)
+])
+
+################################################################################
+#
+# Enable or disable the default CDS archive generation for Compact Object Headers
+#
+AC_DEFUN([JDKOPT_ENABLE_DISABLE_CDS_ARCHIVE_COH],
+[
+  UTIL_ARG_ENABLE(NAME: cds-archive-coh, DEFAULT: auto, RESULT: BUILD_CDS_ARCHIVE_COH,
+      DESC: [enable generation of default CDS archives for compact object headers (requires --enable-cds-archive)],
+      DEFAULT_DESC: [auto],
+      CHECKING_MSG: [if default CDS archives for compact object headers should be generated],
+      CHECK_AVAILABLE: [
+        AC_MSG_CHECKING([if CDS archive with compact object headers is available])
+        if test "x$BUILD_CDS_ARCHIVE" = "xfalse"; then
+          AC_MSG_RESULT([no (CDS default archive generation is disabled)])
+          AVAILABLE=false
+        elif test "x$OPENJDK_TARGET_CPU" != "xaarch64"; then
+          AC_MSG_RESULT([no (compact object headers not supported for this platform)])
+          AVAILABLE=false
+        else
+          AC_MSG_RESULT([yes])
+          AVAILABLE=true
+        fi
+      ])
+  AC_SUBST(BUILD_CDS_ARCHIVE_COH)
 ])
 
 ################################################################################

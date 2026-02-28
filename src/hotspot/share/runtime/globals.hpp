@@ -147,6 +147,7 @@ const size_t minimumSymbolTableSize = 1024;
                            constraint)
 const bool UseCompressedOops = false;
 const bool UseCompressedClassPointers = false;
+const bool UseCompactObjectHeaders = false;
 const int ObjectAlignmentInBytes = 8;
 
 #endif // _LP64
@@ -244,8 +245,10 @@ const int ObjectAlignmentInBytes = 8;
                                                                             \
   product(size_t, LargePageSizeInBytes, 0,                                  \
           "Maximum large page size used (0 will use the default large "     \
-          "page size for the environment as the maximum)")                  \
+          "page size for the environment as the maximum) "                  \
+          "(must be a power of 2)")                                         \
           range(0, max_uintx)                                               \
+          constraint(LargePageSizeInBytesConstraintFunc, AtParse)           \
                                                                             \
   product(size_t, LargePageHeapSizeThreshold, 128*M,                        \
           "Use large pages if maximum heap is at least this big")           \
@@ -2029,6 +2032,9 @@ const int ObjectAlignmentInBytes = 8;
                                                                             \
   product(bool, StressSecondarySupers, false, DIAGNOSTIC,                   \
           "Use a terrible hash function in order to generate many collisions.") \
+                                                                            \
+  product(bool, ElasticMaxDirectMemory, false,                              \
+          "Allow change max direct memory size during runtime with jcmd")   \
                                                                             \
 
 // end of RUNTIME_FLAGS

@@ -402,8 +402,20 @@ CodeEmitInfo* LIRGenerator::state_for(Instruction* x, ValueStack* state, bool ig
 
   ValueStack* s = state;
   for_each_state(s) {
-    if (s->kind() == ValueStack::EmptyExceptionState) {
-      assert(s->stack_size() == 0 && s->locals_size() == 0 && (s->locks_size() == 0 || s->locks_size() == 1), "state must be empty");
+    if (s->kind() == ValueStack::EmptyExceptionState ||
+        s->kind() == ValueStack::CallerEmptyExceptionState)
+    {
+#ifdef ASSERT
+      int index;
+      Value value;
+      for_each_stack_value(s, index, value) {
+        fatal("state must be empty");
+      }
+      for_each_local_value(s, index, value) {
+        fatal("state must be empty");
+      }
+#endif
+      assert(s->locks_size() == 0 || s->locks_size() == 1, "state must be empty");
       continue;
     }
 
@@ -1243,7 +1255,8 @@ void LIRGenerator::do_isInstance(Intrinsic* x) {
 }
 
 void LIRGenerator::load_klass(LIR_Opr obj, LIR_Opr klass, CodeEmitInfo* null_check_info) {
-  __ load_klass(obj, klass, null_check_info);
+  CodeStub* slow_path = AARCH64_ONLY(UseCompactObjectHeaders ? new LoadKlassStub(klass) :) nullptr;
+  __ load_klass(obj, klass, null_check_info, slow_path);
 }
 
 // Example: object.getClass ()

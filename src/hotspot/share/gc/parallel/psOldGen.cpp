@@ -36,11 +36,13 @@
 #include "oops/oop.inline.hpp"
 #include "runtime/java.hpp"
 #include "utilities/align.hpp"
+#include "memory/universe.hpp"
 
 PSOldGen::PSOldGen(ReservedSpace rs, size_t initial_size, size_t min_size,
                    size_t max_size, const char* perf_data_name, int level):
   _min_gen_size(min_size),
-  _max_gen_size(max_size)
+  _max_gen_size(Universe::is_dynamic_max_heap_enable() ? rs.size() : max_size),
+  _cur_max_gen_size(Universe::is_dynamic_max_heap_enable() ? max_size : -1)
 {
   initialize(rs, initial_size, GenAlignment, perf_data_name, level);
 }
@@ -58,6 +60,9 @@ void PSOldGen::initialize_virtual_space(ReservedSpace rs,
                                         size_t alignment) {
 
   _virtual_space = new PSVirtualSpace(rs, alignment);
+  if (Universe::is_dynamic_max_heap_enable()) {
+    _virtual_space->set_dynamic_max_heap_size(_cur_max_gen_size);
+  }
   if (!_virtual_space->expand_by(initial_size)) {
     vm_exit_during_initialization("Could not reserve enough space for "
                                   "object heap");
@@ -66,7 +71,7 @@ void PSOldGen::initialize_virtual_space(ReservedSpace rs,
 
 void PSOldGen::initialize_work(const char* perf_data_name, int level) {
   MemRegion const reserved_mr = reserved();
-  assert(reserved_mr.byte_size() == max_gen_size(), "invariant");
+  assert(reserved_mr.byte_size() == max_gen_size() || Universe::is_dynamic_max_heap_enable(), "invariant");
 
   // Object start stuff: for all reserved memory
   start_array()->initialize(reserved_mr);
@@ -395,7 +400,9 @@ class VerifyObjectStartArrayClosure : public ObjectClosure {
     _start_array(start_array) { }
 
   virtual void do_object(oop obj) {
-    HeapWord* test_addr = cast_from_oop<HeapWord*>(obj) + 1;
+    // With compact headers, the objects can be one-word sized.
+    size_t int_off = AARCH64_ONLY(UseCompactObjectHeaders ? MIN2((size_t)1, obj->size() - 1) :) 1;
+    HeapWord* test_addr = cast_from_oop<HeapWord*>(obj) + int_off;
     guarantee(_start_array->object_start(test_addr) == cast_from_oop<HeapWord*>(obj), "ObjectStartArray cannot find start of object");
     guarantee(_start_array->is_block_allocated(cast_from_oop<HeapWord*>(obj)), "ObjectStartArray missing block allocation");
   }

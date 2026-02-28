@@ -38,6 +38,11 @@
 
 Mutex*   CompiledMethod_lock          = nullptr;
 Monitor* SystemDictionary_lock        = nullptr;
+#ifdef AARCH64
+Mutex*   JitProfileRecorder_lock      = nullptr;
+Mutex*   ProfileCacheClassChain_lock  = nullptr;
+Mutex*   JitProfileCachePrint_lock    = nullptr;
+#endif
 Mutex*   InvokeMethodTypeTable_lock   = nullptr;
 Monitor* InvokeMethodIntrinsicTable_lock = nullptr;
 Mutex*   SharedDictionary_lock        = nullptr;
@@ -210,6 +215,11 @@ void mutex_init() {
   MUTEX_DEFN(tty_lock                        , PaddedMutex  , tty);      // allow to lock in VM
 
   MUTEX_DEFN(STS_lock                        , PaddedMonitor, nosafepoint);
+#ifdef AARCH64
+  MUTEX_DEFN(JitProfileRecorder_lock         , PaddedMutex  , nosafepoint);
+  MUTEX_DEFN(ProfileCacheClassChain_lock     , PaddedMutex  , safepoint);
+  MUTEX_DEFN(JitProfileCachePrint_lock       , PaddedMutex  , safepoint);
+#endif
 
   if (UseG1GC) {
     MUTEX_DEFN(CGC_lock                      , PaddedMonitor, nosafepoint);
