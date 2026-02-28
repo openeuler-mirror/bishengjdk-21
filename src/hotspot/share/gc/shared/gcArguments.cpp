@@ -32,6 +32,7 @@
 #include "runtime/globals_extension.hpp"
 #include "utilities/formatBuffer.hpp"
 #include "utilities/macros.hpp"
+#include "memory/universe.hpp"
 
 size_t HeapAlignment = 0;
 size_t SpaceAlignment = 0;
@@ -155,6 +156,14 @@ void GCArguments::initialize_heap_flags_and_sizes() {
   if (!is_aligned(MaxHeapSize, HeapAlignment)) {
     FLAG_SET_ERGO(MaxHeapSize, align_up(MaxHeapSize, HeapAlignment));
   }
+#ifdef AARCH64
+  if (Universe::is_dynamic_max_heap_enable() && !is_aligned(DynamicMaxHeapSizeLimit, HeapAlignment)) {
+    size_t _dynamic_max_heap_size_limit = DynamicMaxHeapSizeLimit;
+    FLAG_SET_ERGO(DynamicMaxHeapSizeLimit, align_up(DynamicMaxHeapSizeLimit, HeapAlignment));
+    log_debug(dynamic, heap)("align the DynamicMaxHeapSizeLimit " SIZE_FORMAT " up to " SIZE_FORMAT " for heap alignment " SIZE_FORMAT ,
+                              _dynamic_max_heap_size_limit, DynamicMaxHeapSizeLimit, HeapAlignment);
+  }
+#endif //AARCH64
 
   if (!FLAG_IS_DEFAULT(InitialHeapSize) && InitialHeapSize > MaxHeapSize) {
     FLAG_SET_ERGO(MaxHeapSize, InitialHeapSize);

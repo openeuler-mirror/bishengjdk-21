@@ -198,6 +198,9 @@ public:
 
   void update_eden_size();
 
+  // Dynamic Max Heap
+  void update_max_sizes(size_t size);
+
   // Monitoring support used by
   //   MemoryService
   //   jstat counters

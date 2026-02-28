@@ -88,6 +88,7 @@
 #include "gc/shared/oopStorageParState.hpp"
 #include "gc/shared/preservedMarks.inline.hpp"
 #include "gc/shared/referenceProcessor.inline.hpp"
+#include "gc/shared/slidingForwarding.hpp"
 #include "gc/shared/suspendibleThreadSet.hpp"
 #include "gc/shared/taskqueue.inline.hpp"
 #include "gc/shared/taskTerminator.hpp"
@@ -1530,6 +1531,8 @@ jint G1CollectedHeap::initialize() {
 
   G1InitLogger::print();
 
+  SlidingForwarding::initialize(heap_rs.region(), HeapRegion::GrainWords);
+
   return JNI_OK;
 }
 
@@ -2152,6 +2155,12 @@ size_t G1CollectedHeap::unsafe_max_tlab_alloc(Thread* ignored) const {
 }
 
 size_t G1CollectedHeap::max_capacity() const {
+  // Dynamic Max Heap
+  if (Universe::is_dynamic_max_heap_enable()) {
+    size_t cur_size = current_max_heap_size();
+    guarantee(cur_size <= max_regions() * HeapRegion::GrainBytes, "must be");
+    return cur_size;
+  }
   return max_regions() * HeapRegion::GrainBytes;
 }
 
@@ -2916,7 +2925,7 @@ public:
   }
 };
 
-void G1CollectedHeap::rebuild_region_sets(bool free_list_only) {
+void G1CollectedHeap::rebuild_region_sets(bool free_list_only, bool is_dynamic_max_heap_shrink) {
   assert_at_safepoint_on_vm_thread();
 
   if (!free_list_only) {
@@ -2932,7 +2941,10 @@ void G1CollectedHeap::rebuild_region_sets(bool free_list_only) {
   if (!free_list_only) {
     set_used(cl.total_used());
   }
-  assert_used_and_recalculate_used_equal(this);
+  // don't do this assert if is_dynamic_max_heap_shrink
+  if (!is_dynamic_max_heap_shrink) {
+    assert_used_and_recalculate_used_equal(this);
+  }
 }
 
 // Methods for the mutator alloc region
@@ -3169,4 +3181,11 @@ void G1CollectedHeap::start_codecache_marking_cycle_if_inactive(bool concurrent_
 void G1CollectedHeap::finish_codecache_marking_cycle() {
   CodeCache::on_gc_marking_cycle_finish();
   CodeCache::arm_all_nmethods();
+}
+
+bool G1CollectedHeap::change_max_heap(size_t new_size) {
+  assert_heap_not_locked();
+  G1_ChangeMaxHeapOp op(new_size);
+  VMThread::execute(&op);
+  return op.resize_success();
 }

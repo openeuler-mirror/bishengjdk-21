@@ -239,7 +239,7 @@ class fileStream : public outputStream {
   fileStream(const char* file_name);
   fileStream(const char* file_name, const char* opentype);
   fileStream(FILE* file, bool need_close = false) { _file = file; _need_close = need_close; }
-  ~fileStream();
+  virtual ~fileStream();
   bool is_open() const { return _file != nullptr; }
   virtual void write(const char* c, size_t len);
   size_t read(void *data, size_t size, size_t count) { return _file != nullptr ? ::fread(data, size, count, _file) : 0; }
@@ -248,6 +248,19 @@ class fileStream : public outputStream {
   long fileSize();
   void rewind() { if (_file != nullptr) ::rewind(_file); }
   void flush();
+};
+
+class randomAccessFileStream : public fileStream {
+public:
+    randomAccessFileStream();
+    randomAccessFileStream(const char* file_name, const char* open_mode);
+    explicit randomAccessFileStream(FILE* file) : fileStream(file, true) {}
+    ~randomAccessFileStream() override {}
+    void write(const char* data, size_t length) override;
+
+    int seek(long offset, int position) { return ::fseek(_file, offset, position); }
+    long tell() { return ::ftell(_file); }
+    virtual void write(const char* data, size_t length, long position);
 };
 
 // unlike fileStream, fdStream does unbuffered I/O by calling

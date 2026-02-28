@@ -44,7 +44,7 @@
 m4_define(jvm_features_valid, m4_normalize( \
     ifdef([custom_jvm_features_valid], custom_jvm_features_valid) \
     \
-    cds compiler1 compiler2 dtrace epsilongc g1gc jfr jni-check \
+    cds compiler1 compiler2 dtrace epsilongc g1gc jfr jni-check jprofilecache\
     jvmci jvmti link-time-opt management minimal opt-size parallelgc \
     serialgc services shenandoahgc static-build vm-structs zero zgc \
 ))
@@ -63,6 +63,7 @@ m4_define(jvm_feature_desc_epsilongc, [include the epsilon (no-op) garbage colle
 m4_define(jvm_feature_desc_g1gc, [include the G1 garbage collector])
 m4_define(jvm_feature_desc_jfr, [enable JDK Flight Recorder (JFR)])
 m4_define(jvm_feature_desc_jni_check, [enable -Xcheck:jni support])
+m4_define(jvm_feature_desc_jprofilecache, [enable Profile Cache (JPROFILECACHE)])
 m4_define(jvm_feature_desc_jvmci, [enable JVM Compiler Interface (JVMCI)])
 m4_define(jvm_feature_desc_jvmti, [enable Java Virtual Machine Tool Interface (JVM TI)])
 m4_define(jvm_feature_desc_link_time_opt, [enable link time optimization])
@@ -271,6 +272,22 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_DTRACE],
 ])
 
 ###############################################################################
+# Check if the feature 'jprofilecache' is available on this platform.
+#
+AC_DEFUN_ONCE([JVM_FEATURES_CHECK_JPROFILECACHE],
+[
+  JVM_FEATURES_CHECK_AVAILABILITY(jprofilecache, [
+    AC_MSG_CHECKING([if platform is supported by JPROFILECACHE])
+    if test "x$OPENJDK_TARGET_CPU" = "xaarch64"; then
+      AC_MSG_RESULT([yes])
+    else
+      AC_MSG_RESULT([no, $OPENJDK_TARGET_CPU])
+      AVAILABLE=false
+    fi
+  ])
+])
+
+###############################################################################
 # Check if the feature 'jvmci' is available on this platform.
 #
 AC_DEFUN_ONCE([JVM_FEATURES_CHECK_JVMCI],
@@ -393,6 +410,7 @@ AC_DEFUN_ONCE([JVM_FEATURES_PREPARE_PLATFORM],
 
   JVM_FEATURES_CHECK_CDS
   JVM_FEATURES_CHECK_DTRACE
+  JVM_FEATURES_CHECK_JPROFILECACHE
   JVM_FEATURES_CHECK_JVMCI
   JVM_FEATURES_CHECK_SHENANDOAHGC
   JVM_FEATURES_CHECK_STATIC_BUILD
@@ -419,7 +437,7 @@ AC_DEFUN([JVM_FEATURES_PREPARE_VARIANT],
     JVM_FEATURES_VARIANT_UNAVAILABLE="cds minimal zero"
   elif test "x$variant" = "xzero"; then
     JVM_FEATURES_VARIANT_UNAVAILABLE="compiler1 compiler2 \
-        jvmci minimal zgc"
+        jprofilecache jvmci minimal zgc"
   else
     JVM_FEATURES_VARIANT_UNAVAILABLE="minimal zero"
   fi
@@ -514,6 +532,10 @@ AC_DEFUN([JVM_FEATURES_IS_ACTIVE],
 AC_DEFUN([JVM_FEATURES_VERIFY],
 [
   variant=$1
+
+  if JVM_FEATURES_IS_ACTIVE(jprofilecache) && ! (JVM_FEATURES_IS_ACTIVE(compiler2)); then
+    AC_MSG_ERROR([Specified JVM feature 'jprofilecache' requires feature 'compiler2' for variant '$variant'])
+  fi
 
   if JVM_FEATURES_IS_ACTIVE(jvmci) && ! (JVM_FEATURES_IS_ACTIVE(compiler1) || \
       JVM_FEATURES_IS_ACTIVE(compiler2)); then

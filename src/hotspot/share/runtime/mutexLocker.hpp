@@ -33,6 +33,11 @@
 
 extern Mutex*   CompiledMethod_lock;             // a lock used to guard a compiled method and OSR queues
 extern Monitor* SystemDictionary_lock;           // a lock on the system dictionary
+#ifdef AARCH64
+extern Mutex*   JitProfileRecorder_lock;         // a lock on the JProfileCache class JitProfileRecorder
+extern Mutex*   ProfileCacheClassChain_lock;     // a lock on the JProfileCache preload class chain
+extern Mutex*   JitProfileCachePrint_lock;       // a lock on the JProfileCache jstack print
+#endif
 extern Mutex*   InvokeMethodTypeTable_lock;
 extern Monitor* InvokeMethodIntrinsicTable_lock;
 extern Mutex*   SharedDictionary_lock;           // a lock on the CDS shared dictionary

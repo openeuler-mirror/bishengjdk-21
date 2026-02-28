@@ -1971,6 +1971,10 @@ bool os::uncommit_memory(char* addr, size_t bytes, bool executable) {
   return res;
 }
 
+bool os::free_heap_physical_memory(char *addr, size_t bytes) {
+  return pd_free_heap_physical_memory(addr, bytes);
+}
+
 bool os::release_memory(char* addr, size_t bytes) {
   assert_nonempty_range(addr, bytes);
   bool res;

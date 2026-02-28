@@ -50,7 +50,17 @@ oop ZObjArrayAllocator::initialize(HeapWord* mem) const {
   // time and time-to-safepoint
   const size_t segment_max = ZUtils::bytes_to_words(64 * K);
   const BasicType element_type = ArrayKlass::cast(_klass)->element_type();
-  const size_t header = arrayOopDesc::header_size(element_type);
+
+  // Clear leading 32 bits, if necessary.
+  int base_offset = arrayOopDesc::base_offset_in_bytes(element_type);
+  if (!is_aligned(base_offset, HeapWordSize)) {
+    assert(is_aligned(base_offset, BytesPerInt), "array base must be 32 bit aligned");
+    *reinterpret_cast<jint*>(reinterpret_cast<char*>(mem) + base_offset) = 0;
+    base_offset += BytesPerInt;
+  }
+  assert(is_aligned(base_offset, HeapWordSize), "remaining array base must be 64 bit aligned");
+
+  const size_t header = heap_word_size(base_offset);
   const size_t payload_size = _word_size - header;
 
   if (payload_size <= segment_max) {
@@ -66,8 +76,15 @@ oop ZObjArrayAllocator::initialize(HeapWord* mem) const {
 
   // Signal to the ZIterator that this is an invisible root, by setting
   // the mark word to "marked". Reset to prototype() after the clearing.
-  arrayOopDesc::set_mark(mem, markWord::prototype().set_marked());
-  arrayOopDesc::release_set_klass(mem, _klass);
+#ifdef AARCH64
+  if (UseCompactObjectHeaders) {
+    arrayOopDesc::release_set_mark(mem, _klass->prototype_header().set_marked());
+  } else 
+#endif
+  {
+    arrayOopDesc::set_mark(mem, markWord::prototype().set_marked());
+    arrayOopDesc::release_set_klass(mem, _klass);
+  }
   assert(_length >= 0, "length should be non-negative");
   arrayOopDesc::set_length(mem, _length);
 
@@ -135,7 +152,14 @@ oop ZObjArrayAllocator::initialize(HeapWord* mem) const {
   ZThreadLocalData::clear_invisible_root(_thread);
 
   // Signal to the ZIterator that this is no longer an invisible root
-  oopDesc::release_set_mark(mem, markWord::prototype());
+#ifdef AARCH64
+  if (UseCompactObjectHeaders) {
+    oopDesc::release_set_mark(mem, _klass->prototype_header());
+  } else
+#endif
+  {
+    oopDesc::release_set_mark(mem, markWord::prototype());
+  }
 
   return cast_to_oop(mem);
 }

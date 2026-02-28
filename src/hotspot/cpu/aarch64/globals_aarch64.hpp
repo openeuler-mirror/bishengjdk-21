@@ -107,12 +107,58 @@ define_pd_global(intx, InlineSmallCode,          1000);
   product(uint, UseSVE, 0,                                              \
           "Highest supported SVE instruction set version")              \
           range(0, 2)                                                   \
+  product(bool, UseCompactObjectHeaders, false, EXPERIMENTAL,           \
+          "Use compact 64-bit object headers in 64-bit VM")             \
   product(bool, UseBlockZeroing, true,                                  \
           "Use DC ZVA for block zeroing")                               \
   product(intx, BlockZeroingLowLimit, 256,                              \
           "Minimum size in bytes when block zeroing will be used")      \
           range(wordSize, max_jint)                                     \
   product(bool, TraceTraps, false, "Trace all traps the signal handler")\
+                                                                        \
+  product(bool, ExitVMProfileCacheFlush, false, EXPERIMENTAL,           \
+          "ExitVMProfileCacheFlush")                                    \
+                                                                        \
+  product(bool, JProfilingCacheRecording, false, EXPERIMENTAL,          \
+          "Collect profiling information for JProfilingCache")          \
+                                                                        \
+  product(bool, JProfilingCacheCompileAdvance, false, EXPERIMENTAL,     \
+          "Enable JProfilingCacheCompileAdvance from a log file")       \
+                                                                        \
+  product(ccstr, CompilationProfileCacheExclude, nullptr, EXPERIMENTAL, \
+          "JProfilingCacheCompileAdvance excluding list ")              \
+                                                                        \
+  product(bool,  UseJProfilingCacheSystemBlackList, true, EXPERIMENTAL, \
+          "Block Some System Classes loaded by jprofilecache")          \
+                                                                        \
+  product(uintx, JProfilingCacheDelayLoadTime, 1000, EXPERIMENTAL,      \
+          "Sleep time (in milliseconds) before JProfileCache loads "    \
+          "classes and methods profile ")                               \
+          range(0, 3600000)                                             \
+                                                                        \
+  develop(bool, CompilationProfileCacheResolveClassEagerly, true,       \
+          "resolve class from constant pool eagerly")                   \
+                                                                        \
+  product(ccstr, ProfilingCacheFile, nullptr, EXPERIMENTAL,             \
+          "Log file name for JProfilingCache")                          \
+                                                                        \
+  product(uintx, CompilationProfileCacheAppID, 0, EXPERIMENTAL,         \
+          "Application ID written in log file for verification ")       \
+          range(0, 4294967295)                                          \
+                                                                        \
+  product(ccstr, JProfilingCacheAutoArchiveDir, nullptr, EXPERIMENTAL,  \
+          "Specify JProfilingCache directory under which the "          \
+          "jprofilecache file will be auto generated and replayed")     \
+                                                                        \
+  product(int, JProfilingCacheMaxTierLimit, 3, EXPERIMENTAL,            \
+          "If compile_level is higher than the option, method will "    \
+          "be precompiled by the option level")                         \
+          range(1, 4)                                                   \
+                                                                        \
+  product(bool, JProfilingCacheReplayProfileData, false, EXPERIMENTAL,  \
+          "Load method data with dumped ProfileData in the "            \
+          "jprofilecache file if exists")                               \
+                                                                        \
   product(int, SoftwarePrefetchHintDistance, -1,                        \
           "Use prfm hint with specified distance in compiled code."     \
           "Value -1 means off.")                                        \
@@ -127,6 +173,37 @@ define_pd_global(intx, InlineSmallCode,          1000);
           range(1, 99)                                                  \
   product(ccstr, UseBranchProtection, "none",                           \
           "Branch Protection to use: none, standard, pac-ret")          \
+                                                                        \
+  product(size_t, DynamicMaxHeapSizeLimit, ScaleForWordSize(96*M),      \
+          "The limit of Dynamic maximum heap size (in bytes)")          \
+                                                                        \
+  product(uintx, DynamicMaxHeapShrinkMinFreeRatio, 40,                  \
+          "Minimal ratio of free bytes after dynamic max heap shirnk")  \
+                                                                        \
+  product(size_t, ElasticMaxHeapSize, ScaleForWordSize(96*M),           \
+          "Elastic maximum heap size (in bytes)")                       \
+                                                                        \
+  product(bool, ElasticMaxHeap, false,                                  \
+          "Allow change max heap size during runtime with jcmd")        \
+                                                                        \
+  product(bool, TraceElasticMaxHeap, false,                             \
+          "Trace Elastic Max Heap adjustion logs and failure reasons")  \
+                                                                        \
+  product(uintx, ElasticMaxHeapShrinkMinFreeRatio, 40,                  \
+          "minimal ratio of free bytes after elastic max heap shirnk")  \
+                                                                        \
+  product(bool, LogNUMANodes, false,                                    \
+          "Print NUMANodes")                                            \
+                                                                        \
+  product(ccstr, NUMANodes, NULL,                                       \
+          "This parameter provides the same functionality as"           \
+          "'numactl --all -N <nodes> -m <nodes>'."                      \
+          "<nodes> can be '0-2', '0,1,2', 'all' and so on.")            \
+                                                                        \
+  product(uintx, NUMANodesRandom, 0,                                    \
+          "Number of continuous nodes to bind"                          \
+          "with the first node randomly chosen."                        \
+          "NUMANodesRandom has higher priority than NUMANodes")         \
 
 // end of ARCH_FLAGS
 

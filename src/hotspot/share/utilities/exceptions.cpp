@@ -539,7 +539,7 @@ ExceptionMark::~ExceptionMark() {
 // caller frees value_string if necessary
 void Exceptions::debug_check_abort(const char *value_string, const char* message) {
   if (AbortVMOnException != nullptr && value_string != nullptr &&
-      strstr(value_string, AbortVMOnException)) {
+      strstr(AbortVMOnException, value_string)) {
     if (AbortVMOnExceptionMessage == nullptr || (message != nullptr &&
         strstr(message, AbortVMOnExceptionMessage))) {
       if (message == nullptr) {

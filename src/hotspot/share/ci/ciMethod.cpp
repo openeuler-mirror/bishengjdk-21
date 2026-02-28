@@ -36,6 +36,7 @@
 #include "ci/ciUtilities.inline.hpp"
 #include "compiler/abstractCompiler.hpp"
 #include "compiler/compilerDefinitions.inline.hpp"
+#include "compiler/compileTask.hpp"
 #include "compiler/methodLiveness.hpp"
 #include "interpreter/interpreter.hpp"
 #include "interpreter/linkResolver.hpp"
@@ -983,6 +984,7 @@ bool ciMethod::ensure_method_data(const methodHandle& h_m) {
   if (is_native() || is_abstract() || h_m()->is_accessor()) {
     return true;
   }
+
   if (h_m()->method_data() == nullptr) {
     Method::build_profiling_method_data(h_m, THREAD);
     if (HAS_PENDING_EXCEPTION) {

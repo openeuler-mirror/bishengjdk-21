@@ -117,7 +117,8 @@
   template(GTestStopSafepoint)                    \
   template(JFROldObject)                          \
   template(JvmtiPostObjectFree)                   \
-  template(RendezvousGCThreads)
+  template(RendezvousGCThreads)                   \
+  template(DynamicMaxHeap)
 
 class Thread;
 class outputStream;

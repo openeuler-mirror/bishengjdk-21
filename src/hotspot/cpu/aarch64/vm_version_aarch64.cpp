@@ -45,6 +45,7 @@ int VM_Version::_zva_length;
 int VM_Version::_dcache_line_size;
 int VM_Version::_icache_line_size;
 int VM_Version::_initial_sve_vector_length;
+int VM_Version::_max_supported_sve_vector_length;
 bool VM_Version::_rop_protection;
 uintptr_t VM_Version::_pac_mask;
 
@@ -66,6 +67,31 @@ static SpinWait get_spin_wait_desc() {
   }
 
   return SpinWait{};
+}
+
+int VM_Version::get_cpu_model() {
+  int cpu_lines = 0;
+  if (FILE *f = fopen("/proc/cpuinfo", "r")) {
+    char buf[128], *p;
+    while (fgets(buf, sizeof (buf), f) != NULL) {
+      if ((p = strchr(buf, ':')) != NULL) {
+        long v = strtol(p+1, NULL, 0);
+        if (strncmp(buf, "CPU implementer", sizeof "CPU implementer" - 1) == 0) {
+          _cpu = v;
+          cpu_lines++;
+        } else if (strncmp(buf, "CPU variant", sizeof "CPU variant" - 1) == 0) {
+          _variant = v;
+        } else if (strncmp(buf, "CPU part", sizeof "CPU part" - 1) == 0) {
+          if (_model != v)  _model2 = _model;
+          _model = v;
+        } else if (strncmp(buf, "CPU revision", sizeof "CPU revision" - 1) == 0) {
+          _revision = v;
+        }
+      }
+    }
+    fclose(f);
+  }
+  return cpu_lines;
 }
 
 void VM_Version::initialize() {
@@ -524,30 +550,36 @@ void VM_Version::initialize() {
   if (UseSVE > 0) {
     if (FLAG_IS_DEFAULT(MaxVectorSize)) {
       MaxVectorSize = _initial_sve_vector_length;
-    } else if (MaxVectorSize < 16) {
-      warning("SVE does not support vector length less than 16 bytes. Disabling SVE.");
+    } else if (MaxVectorSize < FloatRegister::sve_vl_min) {
+      warning("SVE does not support vector length less than %d bytes. Disabling SVE.",
+              FloatRegister::sve_vl_min);
       UseSVE = 0;
-    } else if ((MaxVectorSize % 16) == 0 && is_power_of_2(MaxVectorSize)) {
-      int new_vl = set_and_get_current_sve_vector_length(MaxVectorSize);
-      _initial_sve_vector_length = new_vl;
-      // Update MaxVectorSize to the largest supported value.
-      if (new_vl < 0) {
-        vm_exit_during_initialization(
-          err_msg("Current system does not support SVE vector length for MaxVectorSize: %d",
-                  (int)MaxVectorSize));
-      } else if (new_vl != MaxVectorSize) {
-        warning("Current system only supports max SVE vector length %d. Set MaxVectorSize to %d",
-                new_vl, new_vl);
-      }
-      MaxVectorSize = new_vl;
-    } else {
+    } else if (!((MaxVectorSize % FloatRegister::sve_vl_min) == 0 && is_power_of_2(MaxVectorSize))) {
       vm_exit_during_initialization(err_msg("Unsupported MaxVectorSize: %d", (int)MaxVectorSize));
+    }
+    if (UseSVE > 0) {
+      // Acquire the largest supported vector length of this machine
+      _max_supported_sve_vector_length = set_and_get_current_sve_vector_length(FloatRegister::sve_vl_max);
+
+      if (MaxVectorSize != _max_supported_sve_vector_length) {
+        int new_vl = set_and_get_current_sve_vector_length(MaxVectorSize);
+        if (new_vl < 0) {
+          vm_exit_during_initialization(
+            err_msg("Current system does not support SVE vector length for MaxVectorSize: %d",
+                    (int)MaxVectorSize));
+        } else if (new_vl != MaxVectorSize) {
+          warning("Current system only supports max SVE vector length %d. Set MaxVectorSize to %d",
+                  new_vl, new_vl);
+        }
+        MaxVectorSize = new_vl;
+      }
+      _initial_sve_vector_length = MaxVectorSize;
     }
   }
 
   if (UseSVE == 0) {  // NEON
     int min_vector_size = 8;
-    int max_vector_size = 16;
+    int max_vector_size = FloatRegister::neon_vl;
     if (!FLAG_IS_DEFAULT(MaxVectorSize)) {
       if (!is_power_of_2(MaxVectorSize)) {
         vm_exit_during_initialization(err_msg("Unsupported MaxVectorSize: %d", (int)MaxVectorSize));
@@ -559,11 +591,11 @@ void VM_Version::initialize() {
         FLAG_SET_DEFAULT(MaxVectorSize, max_vector_size);
       }
     } else {
-      FLAG_SET_DEFAULT(MaxVectorSize, 16);
+      FLAG_SET_DEFAULT(MaxVectorSize, FloatRegister::neon_vl);
     }
   }
 
-  int inline_size = (UseSVE > 0 && MaxVectorSize >= 16) ? MaxVectorSize : 0;
+  int inline_size = (UseSVE > 0 && MaxVectorSize >= FloatRegister::neon_vl) ? MaxVectorSize : 0;
   if (FLAG_IS_DEFAULT(ArrayOperationPartialInlineSize)) {
     FLAG_SET_DEFAULT(ArrayOperationPartialInlineSize, inline_size);
   } else if (ArrayOperationPartialInlineSize != 0 && ArrayOperationPartialInlineSize != inline_size) {

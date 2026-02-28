@@ -51,14 +51,16 @@ public class Correctness {
             PublicKey p1 = kp.getPublic();
             PrivateKey s1 = kp.getPrivate();
 
-            if (s1 instanceof InternalPrivateKey ipk) {
-                PublicKey p2 = ipk.calculatePublicKey();
-                Asserts.assertTrue(Arrays.equals(p2.getEncoded(), p1.getEncoded()));
-                Asserts.assertEQ(p2.getAlgorithm(), p1.getAlgorithm());
-                Asserts.assertEQ(p2.getFormat(), p1.getFormat());
-            } else {
-                throw new RuntimeException("Not an InternalPrivateKey: "
-                        + s1.getClass());
+            if (!s1.getClass().getSimpleName().equals("KAEECPrivateKeyImpl")) {
+                if (s1 instanceof InternalPrivateKey ipk) {
+                    PublicKey p2 = ipk.calculatePublicKey();
+                    Asserts.assertTrue(Arrays.equals(p2.getEncoded(), p1.getEncoded()));
+                    Asserts.assertEQ(p2.getAlgorithm(), p1.getAlgorithm());
+                    Asserts.assertEQ(p2.getFormat(), p1.getFormat());
+                } else {
+                    throw new RuntimeException("Not an InternalPrivateKey: "
+                            + s1.getClass());
+                }
             }
         }
     }

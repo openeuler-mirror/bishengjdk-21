@@ -2352,7 +2352,7 @@ bool Matcher::is_short_branch_offset(int rule, int br_size, int offset) {
 // Vector width in bytes.
 const int Matcher::vector_width_in_bytes(BasicType bt) {
   // The MaxVectorSize should have been set by detecting SVE max vector register size.
-  int size = MIN2((UseSVE > 0) ? 256 : 16, (int)MaxVectorSize);
+  int size = MIN2((UseSVE > 0) ? (int)FloatRegister::sve_vl_max : (int)FloatRegister::neon_vl, (int)MaxVectorSize);
   // Minimum 2 values in vector
   if (size < 2*type2aelembytes(bt)) size = 0;
   // But never < 4
@@ -2391,7 +2391,7 @@ const int Matcher::scalable_vector_reg_size(const BasicType bt) {
 
 // Vector ideal reg.
 const uint Matcher::vector_ideal_reg(int len) {
-  if (UseSVE > 0 && 16 < len && len <= 256) {
+  if (UseSVE > 0 && FloatRegister::neon_vl < len && len <= FloatRegister::sve_vl_max) {
     return Op_VecA;
   }
   switch(len) {
@@ -3401,7 +3401,7 @@ encode %{
     }
   %}
 
-  /// mov envcodings
+  // mov encodings
 
   enc_class aarch64_enc_movw_imm(iRegI dst, immI src) %{
     C2_MacroAssembler _masm(&cbuf);
@@ -7142,7 +7142,7 @@ instruct loadKlass(iRegPNoSp dst, memory8 mem)
 instruct loadNKlass(iRegNNoSp dst, memory4 mem)
 %{
   match(Set dst (LoadNKlass mem));
-  predicate(!needs_acquiring_load(n));
+  predicate(!needs_acquiring_load(n) && !UseCompactObjectHeaders);
 
   ins_cost(4 * INSN_COST);
   format %{ "ldrw  $dst, $mem\t# compressed class ptr" %}
@@ -7150,6 +7150,20 @@ instruct loadNKlass(iRegNNoSp dst, memory4 mem)
   ins_encode(aarch64_enc_ldrw(dst, mem));
 
   ins_pipe(iload_reg_mem);
+%}
+
+instruct loadNKlassCompactHeaders(iRegNNoSp dst, memory4 mem, rFlagsReg cr)
+%{
+  match(Set dst (LoadNKlass mem));
+  effect(KILL cr);
+  predicate(!needs_acquiring_load(n) && UseCompactObjectHeaders);
+
+  ins_cost(4 * INSN_COST);
+  format %{ "ldrw  $dst, $mem\t# compressed class ptr" %}
+  ins_encode %{
+    __ load_nklass_compact($dst$$Register, $mem$$base$$Register, $mem$$index$$Register, $mem$$scale, $mem$$disp);
+  %}
+  ins_pipe(pipe_slow);
 %}
 
 // Load Float
@@ -16433,13 +16447,12 @@ instruct branchLoopEnd(cmpOp cmp, rFlagsReg cr, label lbl)
 
 instruct cmpFastLock(rFlagsReg cr, iRegP object, iRegP box, iRegPNoSp tmp, iRegPNoSp tmp2, iRegPNoSp tmp3)
 %{
+  predicate(LockingMode != LM_LIGHTWEIGHT);
   match(Set cr (FastLock object box));
   effect(TEMP tmp, TEMP tmp2, TEMP tmp3);
 
-  // TODO
-  // identify correct cost
   ins_cost(5 * INSN_COST);
-  format %{ "fastlock $object,$box\t! kills $tmp,$tmp2" %}
+  format %{ "fastlock $object,$box\t! kills $tmp,$tmp2,$tmp3" %}
 
   ins_encode %{
     __ fast_lock($object$$Register, $box$$Register, $tmp$$Register, $tmp2$$Register, $tmp3$$Register);
@@ -16450,6 +16463,7 @@ instruct cmpFastLock(rFlagsReg cr, iRegP object, iRegP box, iRegPNoSp tmp, iRegP
 
 instruct cmpFastUnlock(rFlagsReg cr, iRegP object, iRegP box, iRegPNoSp tmp, iRegPNoSp tmp2)
 %{
+  predicate(LockingMode != LM_LIGHTWEIGHT);
   match(Set cr (FastUnlock object box));
   effect(TEMP tmp, TEMP tmp2);
 
@@ -16463,6 +16477,37 @@ instruct cmpFastUnlock(rFlagsReg cr, iRegP object, iRegP box, iRegPNoSp tmp, iRe
   ins_pipe(pipe_serial);
 %}
 
+instruct cmpFastLockLightweight(rFlagsReg cr, iRegP object, iRegP box, iRegPNoSp tmp, iRegPNoSp tmp2)
+%{
+  predicate(LockingMode == LM_LIGHTWEIGHT);
+  match(Set cr (FastLock object box));
+  effect(TEMP tmp, TEMP tmp2);
+
+  ins_cost(5 * INSN_COST);
+  format %{ "fastlock $object,$box\t! kills $tmp,$tmp2" %}
+
+  ins_encode %{
+    __ fast_lock_lightweight($object$$Register, $box$$Register, $tmp$$Register, $tmp2$$Register);
+  %}
+
+  ins_pipe(pipe_serial);
+%}
+
+instruct cmpFastUnlockLightweight(rFlagsReg cr, iRegP object, iRegP box, iRegPNoSp tmp, iRegPNoSp tmp2)
+%{
+  predicate(LockingMode == LM_LIGHTWEIGHT);
+  match(Set cr (FastUnlock object box));
+  effect(TEMP tmp, TEMP tmp2);
+
+  ins_cost(5 * INSN_COST);
+  format %{ "fastunlock $object,$box\t! kills $tmp, $tmp2" %}
+
+  ins_encode %{
+    __ fast_unlock_lightweight($object$$Register, $box$$Register, $tmp$$Register, $tmp2$$Register);
+  %}
+
+  ins_pipe(pipe_serial);
+%}
 
 // ============================================================================
 // Safepoint Instructions

@@ -82,6 +82,7 @@
 #include "runtime/javaCalls.hpp"
 #include "runtime/javaThread.inline.hpp"
 #include "runtime/jniHandles.inline.hpp"
+#include "runtime/lockStack.hpp"
 #include "runtime/os.hpp"
 #include "runtime/stackFrameStream.inline.hpp"
 #include "runtime/synchronizer.hpp"
@@ -1038,12 +1039,13 @@ WB_ENTRY(jboolean, WB_TestSetForceInlineMethod(JNIEnv* env, jobject o, jobject m
 WB_END
 
 #ifdef LINUX
-bool WhiteBox::validate_cgroup(const char* proc_cgroups,
+bool WhiteBox::validate_cgroup(bool cgroups_v2_enabled,
+                               const char* controllers_file,
                                const char* proc_self_cgroup,
                                const char* proc_self_mountinfo,
                                u1* cg_flags) {
   CgroupInfo cg_infos[CG_INFO_LENGTH];
-  return CgroupSubsystemFactory::determine_type(cg_infos, proc_cgroups,
+  return CgroupSubsystemFactory::determine_type(cg_infos, cgroups_v2_enabled, controllers_file,
                                                     proc_self_cgroup,
                                                     proc_self_mountinfo, cg_flags);
 }
@@ -1856,6 +1858,14 @@ WB_ENTRY(jboolean, WB_IsUbsanEnabled(JNIEnv* env))
   return (jboolean) WhiteBox::is_ubsan_enabled();
 WB_END
 
+WB_ENTRY(jint, WB_getLockStackCapacity(JNIEnv* env))
+  return (jint) LockStack::CAPACITY;
+WB_END
+
+WB_ENTRY(jboolean, WB_supportsRecursiveLightweightLocking(JNIEnv* env))
+  return (jboolean) VM_Version::supports_recursive_lightweight_locking();
+WB_END
+
 WB_ENTRY(jboolean, WB_DeflateIdleMonitors(JNIEnv* env, jobject wb))
   log_info(monitorinflation)("WhiteBox initiated DeflateIdleMonitors");
   return ObjectSynchronizer::request_deflate_idle_monitors_from_wb();
@@ -2419,13 +2429,14 @@ WB_END
 
 WB_ENTRY(jint, WB_ValidateCgroup(JNIEnv* env,
                                     jobject o,
-                                    jstring proc_cgroups,
+                                    jboolean cgroups_v2_enabled,
+                                    jstring controllers_file,
                                     jstring proc_self_cgroup,
                                     jstring proc_self_mountinfo))
   jint ret = 0;
 #ifdef LINUX
   ThreadToNativeFromVM ttnfv(thread);
-  const char* p_cgroups = env->GetStringUTFChars(proc_cgroups, nullptr);
+  const char* c_file = env->GetStringUTFChars(controllers_file, nullptr);
   CHECK_JNI_EXCEPTION_(env, 0);
   const char* p_s_cgroup = env->GetStringUTFChars(proc_self_cgroup, nullptr);
   CHECK_JNI_EXCEPTION_(env, 0);
@@ -2433,9 +2444,9 @@ WB_ENTRY(jint, WB_ValidateCgroup(JNIEnv* env,
   CHECK_JNI_EXCEPTION_(env, 0);
   u1 cg_type_flags = 0;
   // This sets cg_type_flags
-  WhiteBox::validate_cgroup(p_cgroups, p_s_cgroup, p_s_mountinfo, &cg_type_flags);
+  WhiteBox::validate_cgroup(cgroups_v2_enabled, c_file, p_s_cgroup, p_s_mountinfo, &cg_type_flags);
   ret = (jint)cg_type_flags;
-  env->ReleaseStringUTFChars(proc_cgroups, p_cgroups);
+  env->ReleaseStringUTFChars(controllers_file, c_file);
   env->ReleaseStringUTFChars(proc_self_cgroup, p_s_cgroup);
   env->ReleaseStringUTFChars(proc_self_mountinfo, p_s_mountinfo);
 #endif
@@ -2784,6 +2795,8 @@ static JNINativeMethod methods[] = {
   {CC"isMonitorInflated0", CC"(Ljava/lang/Object;)Z", (void*)&WB_IsMonitorInflated  },
   {CC"isAsanEnabled", CC"()Z",                        (void*)&WB_IsAsanEnabled },
   {CC"isUbsanEnabled", CC"()Z",                       (void*)&WB_IsUbsanEnabled },
+  {CC"getLockStackCapacity", CC"()I",                 (void*)&WB_getLockStackCapacity },
+  {CC"supportsRecursiveLightweightLocking", CC"()Z",  (void*)&WB_supportsRecursiveLightweightLocking },
   {CC"forceSafepoint",     CC"()V",                   (void*)&WB_ForceSafepoint     },
   {CC"forceClassLoaderStatsSafepoint", CC"()V",       (void*)&WB_ForceClassLoaderStatsSafepoint },
   {CC"getConstantPool0",   CC"(Ljava/lang/Class;)J",  (void*)&WB_GetConstantPool    },
@@ -2853,7 +2866,7 @@ static JNINativeMethod methods[] = {
                                                       (void*)&WB_CheckLibSpecifiesNoexecstack},
   {CC"isContainerized",           CC"()Z",            (void*)&WB_IsContainerized },
   {CC"validateCgroup",
-      CC"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I",
+      CC"(ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)I",
                                                       (void*)&WB_ValidateCgroup },
   {CC"hostPhysicalMemory",        CC"()J",            (void*)&WB_HostPhysicalMemory },
   {CC"hostPhysicalSwap",          CC"()J",            (void*)&WB_HostPhysicalSwap },

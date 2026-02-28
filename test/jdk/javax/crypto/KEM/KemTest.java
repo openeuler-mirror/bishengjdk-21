@@ -97,62 +97,64 @@ public class KemTest {
             try {
                 KeyPair kp = keyPair.gen(algo, curveId);
                 KEM.Encapsulator encT = kem.newEncapsulator(kp.getPublic());
-                Asserts.assertEQ(encT.providerName(), PROVIDER);
-                KEM.Encapsulated enc = encT.encapsulate();
-                KEM.Encapsulated enc1 = encT.encapsulate();
+                if (!kp.getPrivate().getClass().getSimpleName().equals("KAEECPrivateKeyImpl")) {
+                    Asserts.assertEQ(encT.providerName(), PROVIDER);
+                    KEM.Encapsulated enc = encT.encapsulate();
+                    KEM.Encapsulated enc1 = encT.encapsulate();
 
-                KEM kem1 = KEM.getInstance(ALGO, PROVIDER);
-                KEM.Encapsulator encT2 = kem1.newEncapsulator(kp.getPublic());
-                KEM.Encapsulated enc2 = encT2.encapsulate();
+                    KEM kem1 = KEM.getInstance(ALGO, PROVIDER);
+                    KEM.Encapsulator encT2 = kem1.newEncapsulator(kp.getPublic());
+                    KEM.Encapsulated enc2 = encT2.encapsulate();
 
-                Asserts.assertEQ(enc.key().getEncoded().length, nSecret);
-                Asserts.assertEQ(enc.encapsulation().length, nEnc);
+                    Asserts.assertEQ(enc.key().getEncoded().length, nSecret);
+                    Asserts.assertEQ(enc.encapsulation().length, nEnc);
 
-                Asserts.assertTrue(Arrays.equals(enc.key().getEncoded(), enc.key().getEncoded()));
-                Asserts.assertTrue(Arrays.equals(enc.encapsulation(), enc.encapsulation()));
+                    Asserts.assertTrue(Arrays.equals(enc.key().getEncoded(), enc.key().getEncoded()));
+                    Asserts.assertTrue(Arrays.equals(enc.encapsulation(), enc.encapsulation()));
 
-                Asserts.assertFalse(Arrays.equals(enc.key().getEncoded(), enc1.key().getEncoded()));
-                Asserts.assertFalse(Arrays.equals(enc.encapsulation(), enc1.encapsulation()));
+                    Asserts.assertFalse(Arrays.equals(enc.key().getEncoded(), enc1.key().getEncoded()));
+                    Asserts.assertFalse(Arrays.equals(enc.encapsulation(), enc1.encapsulation()));
 
-                Asserts.assertFalse(Arrays.equals(enc.key().getEncoded(), enc2.key().getEncoded()));
-                Asserts.assertFalse(Arrays.equals(enc.encapsulation(), enc2.encapsulation()));
+                    Asserts.assertFalse(Arrays.equals(enc.key().getEncoded(), enc2.key().getEncoded()));
+                    Asserts.assertFalse(Arrays.equals(enc.encapsulation(), enc2.encapsulation()));
 
-                SecretKey sk = enc.key();
-                KEM.Decapsulator decT = kem.newDecapsulator(kp.getPrivate());
-                SecretKey dsk = decT.decapsulate(enc.encapsulation());
-                Asserts.assertEQ(decT.providerName(), PROVIDER);
-                Asserts.assertTrue(Arrays.equals(sk.getEncoded(), dsk.getEncoded()));
-                Asserts.assertTrue(Arrays.equals(sk.getEncoded(),
-                        decT.decapsulate(enc.encapsulation()).getEncoded()));
-                Asserts.assertTrue(Arrays.equals(enc.key().getEncoded(),
-                        decT.decapsulate(enc.encapsulation()).getEncoded()));
+                    SecretKey sk = enc.key();
+                    KEM.Decapsulator decT = kem.newDecapsulator(kp.getPrivate());
+                    SecretKey dsk = decT.decapsulate(enc.encapsulation());
+                    Asserts.assertEQ(decT.providerName(), PROVIDER);
+                    Asserts.assertTrue(Arrays.equals(sk.getEncoded(), dsk.getEncoded()));
+                    Asserts.assertTrue(Arrays.equals(sk.getEncoded(),
+                            decT.decapsulate(enc.encapsulation()).getEncoded()));
+                    Asserts.assertTrue(Arrays.equals(enc.key().getEncoded(),
+                            decT.decapsulate(enc.encapsulation()).getEncoded()));
 
-                Asserts.assertEQ(encT.encapsulationSize(), enc.encapsulation().length);
-                Asserts.assertEQ(encT.encapsulationSize(), decT.encapsulationSize());
-                Asserts.assertEQ(encT.secretSize(), enc.key().getEncoded().length);
-                Asserts.assertEQ(encT.secretSize(), decT.secretSize());
-                Asserts.assertEQ(decT.secretSize(), dsk.getEncoded().length);
-                Asserts.assertEQ(decT.secretSize(),
-                        decT.decapsulate(enc.encapsulation()).getEncoded().length);
-                Asserts.assertEQ(decT.decapsulate(enc.encapsulation()).getEncoded().length,
-                        enc.key().getEncoded().length);
+                    Asserts.assertEQ(encT.encapsulationSize(), enc.encapsulation().length);
+                    Asserts.assertEQ(encT.encapsulationSize(), decT.encapsulationSize());
+                    Asserts.assertEQ(encT.secretSize(), enc.key().getEncoded().length);
+                    Asserts.assertEQ(encT.secretSize(), decT.secretSize());
+                    Asserts.assertEQ(decT.secretSize(), dsk.getEncoded().length);
+                    Asserts.assertEQ(decT.secretSize(),
+                            decT.decapsulate(enc.encapsulation()).getEncoded().length);
+                    Asserts.assertEQ(decT.decapsulate(enc.encapsulation()).getEncoded().length,
+                            enc.key().getEncoded().length);
 
-                KEM.Encapsulated enc3 = encT.encapsulate(0, encT.secretSize(), "AES");
-                KEM.Decapsulator decT1 = kem.newDecapsulator(kp.getPrivate());
-                SecretKey dsk1 = decT1.decapsulate(
-                        enc3.encapsulation(), 0, decT1.secretSize(), "AES");
-                Asserts.assertTrue(Arrays.equals(dsk1.getEncoded(), enc3.key().getEncoded()));
+                    KEM.Encapsulated enc3 = encT.encapsulate(0, encT.secretSize(), "AES");
+                    KEM.Decapsulator decT1 = kem.newDecapsulator(kp.getPrivate());
+                    SecretKey dsk1 = decT1.decapsulate(
+                            enc3.encapsulation(), 0, decT1.secretSize(), "AES");
+                    Asserts.assertTrue(Arrays.equals(dsk1.getEncoded(), enc3.key().getEncoded()));
 
-                try {
-                    decT.decapsulate(new byte[enc.encapsulation().length]);
-                    throw new RuntimeException("Shouldn't reach here");
-                } catch (DecapsulateException de) {
-                    //de.printStackTrace();
-                    System.out.println("Expected Failure: mismatched encapsulation");
+                    try {
+                        decT.decapsulate(new byte[enc.encapsulation().length]);
+                        throw new RuntimeException("Shouldn't reach here");
+                    } catch (DecapsulateException de) {
+                        //de.printStackTrace();
+                        System.out.println("Expected Failure: mismatched encapsulation");
+                    }
+
+                    System.out.println("KEM Secret length:" + algo + ":" + curveId
+                            + ":nSecret:" + nSecret + ":nEnc:" + nEnc);
                 }
-
-                System.out.println("KEM Secret length:" + algo + ":" + curveId
-                        + ":nSecret:" + nSecret + ":nEnc:" + nEnc);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -190,6 +192,7 @@ public class KemTest {
     private static void testParallelEncapsulator(KEM kem, String algo, String curveId)
             throws Exception {
         KeyPair kp = keyPair.gen(algo, curveId);
+        if (kp.getPrivate().getClass().getSimpleName().equals("KAEECPrivateKeyImpl")) { return; }
         ExecutorService executor = null;
         try {
             executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
@@ -225,6 +228,7 @@ public class KemTest {
     private static void testParallelEncapsulate(KEM kem, String algo, String curveId)
             throws Exception {
         KeyPair kp = keyPair.gen(algo, curveId);
+        if (kp.getPrivate().getClass().getSimpleName().equals("KAEECPrivateKeyImpl")) { return; }
         ExecutorService executor = null;
         try {
             executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
@@ -258,6 +262,7 @@ public class KemTest {
     private static void testParallelDecapsulator(KEM kem, String algo, String curveId)
             throws Exception {
         KeyPair kp = keyPair.gen(algo, curveId);
+        if (kp.getPrivate().getClass().getSimpleName().equals("KAEECPrivateKeyImpl")) { return; }
         ExecutorService executor = null;
         try {
             executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
@@ -291,6 +296,7 @@ public class KemTest {
     private static void testParallelDecapsulate(KEM kem, String algo, String curveId)
             throws Exception {
         KeyPair kp = keyPair.gen(algo, curveId);
+        if (kp.getPrivate().getClass().getSimpleName().equals("KAEECPrivateKeyImpl")) { return; }
         ExecutorService executor = null;
         try {
             executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);

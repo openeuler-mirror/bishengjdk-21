@@ -164,6 +164,10 @@ private:
                            Symbol*          sig,
                            Bytecodes::Code  bc,
                            constantTag      tag);
+#ifdef AARCH64
+  bool       is_field_resolved(ciInstanceKlass* accessor_klass,
+                                  int constant_pool_index, Bytecodes::Code bc);
+#endif
 
   ciConstant unbox_primitive_value(ciObject* cibox, BasicType expected_bt = T_ILLEGAL);
   ciConstant get_resolved_constant(const constantPoolHandle& cpool, int obj_index);
@@ -324,6 +328,11 @@ public:
 
   // Reason this compilation is failing, such as "too many basic blocks".
   const char* failure_reason() const { return _failure_reason.get(); }
+
+#ifdef AARCH64
+  // Check if all fields needed by this method in ConstantPool are resolved
+  bool  are_method_fields_all_resolved(ciMethod* method);
+#endif
 
   // Return state of appropriate compatibility
   int compilable() { return _compilable; }

@@ -52,6 +52,13 @@ inline bool Klass::is_loader_alive() const {
   return class_loader_data()->is_alive();
 }
 
+#ifdef AARCH64
+inline void Klass::set_prototype_header(markWord header) {
+  assert(UseCompactObjectHeaders, "only with compact headers");
+  _prototype_header = header;
+}
+#endif
+
 inline oop Klass::java_mirror() const {
   return _java_mirror.resolve();
 }

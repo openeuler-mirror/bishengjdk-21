@@ -228,7 +228,9 @@ bool CollectedHeap::is_oop(oop object) const {
     return false;
   }
 
-  if (!Metaspace::contains(object->klass_raw())) {
+  // With compact headers, we can't safely access the class, due
+  // to possibly forwarded objects.
+  if (AARCH64_ONLY(!UseCompactObjectHeaders &&) !Metaspace::contains(object->klass_raw())) {
     return false;
   }
 
@@ -243,6 +245,7 @@ CollectedHeap::CollectedHeap() :
   _used_at_last_gc(0),
   _is_stw_gc_active(false),
   _last_whole_heap_examined_time_ns(os::javaTimeNanos()),
+  _current_max_heap_size(MaxHeapSize),
   _total_collections(0),
   _total_full_collections(0),
   _gc_cause(GCCause::_no_gc),
@@ -400,6 +403,13 @@ void CollectedHeap::set_gc_cause(GCCause::Cause v) {
   _gc_cause = v;
 }
 
+// Returns the header size in words aligned to the requirements of the
+// array object type.
+static int int_array_header_size() {
+  size_t typesize_in_bytes = arrayOopDesc::header_size_in_bytes();
+  return (int)align_up(typesize_in_bytes, HeapWordSize)/HeapWordSize;
+}
+
 size_t CollectedHeap::max_tlab_size() const {
   // TLABs can't be bigger than we can fill with a int[Integer.MAX_VALUE].
   // This restriction could be removed by enabling filling with multiple arrays.
@@ -409,14 +419,14 @@ size_t CollectedHeap::max_tlab_size() const {
   // We actually lose a little by dividing first,
   // but that just makes the TLAB  somewhat smaller than the biggest array,
   // which is fine, since we'll be able to fill that.
-  size_t max_int_size = typeArrayOopDesc::header_size(T_INT) +
+  size_t max_int_size = int_array_header_size() +
               sizeof(jint) *
               ((juint) max_jint / (size_t) HeapWordSize);
   return align_down(max_int_size, MinObjAlignment);
 }
 
 size_t CollectedHeap::filler_array_hdr_size() {
-  return align_object_offset(arrayOopDesc::header_size(T_INT)); // align to Long
+  return align_object_offset(int_array_header_size()); // align to Long
 }
 
 size_t CollectedHeap::filler_array_min_size() {

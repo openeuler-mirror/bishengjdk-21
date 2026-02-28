@@ -76,6 +76,10 @@
 #include "utilities/quickSort.hpp"
 #include "utilities/vmError.hpp"
 #include "utilities/xmlstream.hpp"
+#ifdef AARCH64
+#include "jprofilecache/jitProfileCacheFileParser.hpp"
+#include "jprofilecache/jitProfileClassChain.hpp"
+#endif
 
 // Implementation of Method
 
@@ -105,6 +109,15 @@ Method::Method(ConstMethod* xconst, AccessFlags access_flags, Symbol* name) {
   set_method_data(nullptr);
   clear_method_counters();
   set_vtable_index(Method::garbage_vtable_index);
+
+#ifdef AARCH64
+  set_first_invoke_init_order(INVALID_FIRST_INVOKE_INIT_ORDER);
+  set_compiled_by_jprofilecache(false);
+
+#ifndef PRODUCT
+  set_deopted_by_jprofilecache(false);
+#endif // PRODUCT
+#endif // AARCH64
 
   // Fix and bury in Method*
   set_interpreter_entry(nullptr); // sets i2i entry and from_int
