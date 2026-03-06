@@ -120,12 +120,15 @@ JitProfileCache::JitProfileCacheState JitProfileCache::flush_recorder() {
   if(_jit_profile_cache_state == IS_ERR) {
     return _jit_profile_cache_state;
   }
-  _jit_profile_cache_recorder->flush_record();
-  if (_jit_profile_cache_recorder->is_valid()) {
-    _jit_profile_cache_state = IS_OK;
-  } else {
-    _jit_profile_cache_state = IS_ERR;
+  if (!_jit_profile_cache_recorder->flush_record()) {
+    // Dump I/O failures are transient. Keep recorder/cache state so next jcmd can retry.
+    return IS_ERR;
   }
+  if (!_jit_profile_cache_recorder->is_valid()) {
+    _jit_profile_cache_state = IS_ERR;
+    return _jit_profile_cache_state;
+  }
+  _jit_profile_cache_state = IS_OK;
   return _jit_profile_cache_state;
 }
 
