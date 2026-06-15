@@ -5763,13 +5763,32 @@ address MacroAssembler::arrays_equals(Register a1, Register a2, Register tmp3,
 void MacroAssembler::string_equals(Register a1, Register a2,
                                    Register result, Register cnt1, int elem_size)
 {
-  Label SAME, DONE, SHORT, NEXT_WORD;
+  address tpc = string_equals(a1, a2, result, cnt1, elem_size, false, noreg, noreg);
+  guarantee(tpc != nullptr, "scalar string_equals must not emit a trampoline call");
+}
+
+address MacroAssembler::string_equals(Register a1, Register a2,
+                                      Register result, Register cnt1,
+                                      int elem_size,
+                                      bool use_array_equals_stub,
+                                      Register stub_a2, Register stub_cnt)
+{
+  Label SAME, DONE, SHORT, NEXT_WORD, STUB;
   Register tmp1 = rscratch1;
   Register tmp2 = rscratch2;
   Register cnt2 = tmp2;  // cnt2 only used in array length compare
 
   assert(elem_size == 1 || elem_size == 2, "must be 2 or 1 byte");
-  assert_different_registers(a1, a2, result, cnt1, rscratch1, rscratch2);
+  guarantee(use_array_equals_stub == UseSIMDForStringEquals,
+            "stub use must match UseSIMDForStringEquals");
+  if (use_array_equals_stub) {
+    guarantee(stub_a2 == r2 && stub_cnt == r10,
+              "registers must match large_array_equals stub");
+    assert_different_registers(a1, a2, result, cnt1, stub_a2, stub_cnt, rscratch1, rscratch2);
+  } else {
+    guarantee(stub_a2 == noreg && stub_cnt == noreg, "stub registers must not be passed");
+    assert_different_registers(a1, a2, result, cnt1, rscratch1, rscratch2);
+  }
 
 #ifndef PRODUCT
   {
@@ -5785,6 +5804,11 @@ void MacroAssembler::string_equals(Register a1, Register a2,
   // Check for short strings, i.e. smaller than wordSize.
   subs(cnt1, cnt1, wordSize);
   br(Assembler::LT, SHORT);
+  if (use_array_equals_stub) {
+    const int stubBytesThreshold = 3 * 64 + (UseSIMDForArrayEquals ? 0 : 16);
+    cmp(cnt1, (u1)(stubBytesThreshold - wordSize));
+    br(Assembler::GE, STUB);
+  }
   // Main 8 byte comparison loop.
   bind(NEXT_WORD); {
     ldr(tmp1, Address(post(a1, wordSize)));
@@ -5837,8 +5861,31 @@ void MacroAssembler::string_equals(Register a1, Register a2,
   mov(result, true);
 
   // That's it.
+  if (use_array_equals_stub) {
+    b(DONE);
+
+    bind(STUB);
+    ldr(tmp1, Address(a1));
+    ldr(tmp2, Address(a2));
+    eor(tmp1, tmp1, tmp2);
+    cbnz(tmp1, DONE);
+    mov(stub_a2, a2);
+    mov(stub_cnt, cnt1);
+    add(stub_cnt, stub_cnt, wordSize);
+    RuntimeAddress stub = RuntimeAddress(StubRoutines::aarch64::large_array_equals());
+    assert(stub.target() != nullptr, "array_equals_long stub has not been generated");
+    address tpc = trampoline_call(stub);
+    if (tpc == nullptr) {
+      DEBUG_ONLY(reset_labels(STUB, SHORT, SAME, DONE));
+      postcond(pc() == badAddress);
+      return nullptr;
+    }
+  }
+
   bind(DONE);
   BLOCK_COMMENT("} string_equals");
+  postcond(pc() != badAddress);
+  return pc();
 }
 
 

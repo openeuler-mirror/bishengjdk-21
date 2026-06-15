@@ -1459,6 +1459,9 @@ public:
 
   void string_equals(Register a1, Register a2, Register result, Register cnt1,
                      int elem_size);
+  address string_equals(Register a1, Register a2, Register result, Register cnt1,
+                        int elem_size, bool use_array_equals_stub,
+                        Register stub_a2, Register stub_cnt);
 
   void fill_words(Register base, Register cnt, Register value);
   address zero_words(Register base, uint64_t cnt);

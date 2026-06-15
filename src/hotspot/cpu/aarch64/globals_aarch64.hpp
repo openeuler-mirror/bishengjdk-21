@@ -96,6 +96,8 @@ define_pd_global(intx, InlineSmallCode,          1000);
           "Use SIMD instructions in generated memory move code")        \
   product(bool, UseSIMDForArrayEquals, true,                            \
           "Use SIMD instructions in generated array equals code")       \
+  product(bool, UseSIMDForStringEquals, false,                          \
+          "Use SIMD array equals stub for long String equals")           \
   product(bool, UseSimpleArrayEquals, false,                            \
           "Use simplest and shortest implementation for array equals")  \
   product(bool, UseSIMDForBigIntegerShiftIntrinsics, true,              \

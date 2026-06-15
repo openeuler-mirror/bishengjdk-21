@@ -274,6 +274,11 @@ void VM_Version::initialize() {
 
   _features_string = os::strdup(buf);
 
+  if (UseSIMDForStringEquals && (!UseSIMDForArrayEquals || UseSimpleArrayEquals)) {
+    warning("UseSIMDForStringEquals requires UseSIMDForArrayEquals and disabled UseSimpleArrayEquals; disabling");
+    FLAG_SET_DEFAULT(UseSIMDForStringEquals, false);
+  }
+
   if (FLAG_IS_DEFAULT(UseCRC32)) {
     UseCRC32 = VM_Version::supports_crc32();
   }
