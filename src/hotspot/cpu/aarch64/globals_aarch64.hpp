@@ -111,6 +111,28 @@ define_pd_global(intx, InlineSmallCode,          1000);
   product(uint, UseSVE, 0,                                              \
           "Highest supported SVE instruction set version")              \
           range(0, 2)                                                   \
+  product(bool, UseSVEHashCodeIntrinsic, false,                         \
+          "Use SVE2 instructions in the vectorized hashcode intrinsic") \
+  product(uint, SVEHashCodeStubMinVectorChunks, 1, DIAGNOSTIC,          \
+          "Minimum number of full SVE vector chunks before using SVE2 "  \
+          "hashcode stubs")                                             \
+          range(1, 64)                                                  \
+  product(uint, SVEHashCodeLatin1MinElements, 64, DIAGNOSTIC,           \
+          "Minimum Latin1 element count before using SVE2 hashcode "    \
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
+  product(uint, SVEHashCodeByteMinElements, 64, DIAGNOSTIC,             \
+          "Minimum byte array element count before using SVE2 hashcode " \
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
+  product(uint, SVEHashCodeUTF16MinElements, 256, DIAGNOSTIC,           \
+          "Minimum UTF16 element count before using SVE2 hashcode "     \
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
+  product(uint, SVEHashCodeShortMinElements, 256, DIAGNOSTIC,           \
+          "Minimum short array element count before using SVE2 hashcode "\
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
   product(bool, UseCompactObjectHeaders, false, EXPERIMENTAL,           \
           "Use compact 64-bit object headers in 64-bit VM")             \
   product(bool, UseBlockZeroing, true,                                  \

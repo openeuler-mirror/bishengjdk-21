@@ -38,7 +38,7 @@ enum platform_dependent_constants {
   // simply increase sizes if too small (assembler will crash if too small)
   _initial_stubs_code_size      = 10000,
   _continuation_stubs_code_size =  2000,
-  _compiler_stubs_code_size     = 30000 ZGC_ONLY(+10000),
+  _compiler_stubs_code_size     = 80000 ZGC_ONLY(+10000),
   _final_stubs_code_size        = 20000 ZGC_ONLY(+100000)
 };
 
@@ -67,6 +67,10 @@ class aarch64 {
   static address _large_arrays_hashcode_char;
   static address _large_arrays_hashcode_int;
   static address _large_arrays_hashcode_short;
+  static address _large_arrays_hashcode_sve2_boolean;
+  static address _large_arrays_hashcode_sve2_byte;
+  static address _large_arrays_hashcode_sve2_char;
+  static address _large_arrays_hashcode_sve2_short;
   static address _compare_long_string_LL;
   static address _compare_long_string_LU;
   static address _compare_long_string_UL;
@@ -176,6 +180,23 @@ class aarch64 {
       return _large_arrays_hashcode_short;
     case T_INT:
       return _large_arrays_hashcode_int;
+    default:
+      ShouldNotReachHere();
+    }
+
+    return nullptr;
+  }
+
+  static address large_arrays_hashcode_sve(BasicType eltype) {
+    switch (eltype) {
+    case T_BOOLEAN:
+      return _large_arrays_hashcode_sve2_boolean;
+    case T_BYTE:
+      return _large_arrays_hashcode_sve2_byte;
+    case T_CHAR:
+      return _large_arrays_hashcode_sve2_char;
+    case T_SHORT:
+      return _large_arrays_hashcode_sve2_short;
     default:
       ShouldNotReachHere();
     }

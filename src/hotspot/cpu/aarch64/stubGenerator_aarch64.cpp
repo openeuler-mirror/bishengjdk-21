@@ -5619,6 +5619,351 @@ class StubGenerator: public StubCodeGenerator {
     return entry;
   }
 
+  address generate_large_arrays_hashcode_sve2(BasicType eltype) {
+    assert(eltype == T_BOOLEAN || eltype == T_BYTE ||
+           eltype == T_CHAR || eltype == T_SHORT, "unsupported eltype");
+
+    const Register result = r0, ary = r1, cnt = r2;
+    const Register pow_n = rscratch1, tmp = rscratch2;
+    const PRegister pload = p0, pwords = p1;
+    const FloatRegister zraw = v0;
+    const FloatRegister zh = v1;        // intermediate H-lane fold (byte path only)
+    const FloatRegister zs = v2;        // final S-lane group hashes
+    const FloatRegister zacc1 = v3;     // additional accumulators for 4x unroll
+    const FloatRegister zacc2 = v4;
+    const FloatRegister zacc3 = v5;
+    const FloatRegister zraw_alt = v6;  // second raw/fold pair for unrolled loops
+    const FloatRegister ztmp_alt = v7;
+    const FloatRegister zacc = v10;
+    const FloatRegister zpow = v11;
+    const FloatRegister zpowm = v12;
+    const FloatRegister zcoef_b = v13;  // byte coefficient vector (byte path only)
+    const FloatRegister zcoef_h = v14;  // halfword coefficient vector
+    const uint32_t vl_bytes = VM_Version::get_initial_sve_vector_length();
+    const bool is_byte = type2aelembytes(eltype) == 1;
+    const bool is_signed = is_signed_subword_type(eltype);
+    const uint32_t lanes = vl_bytes / sizeof(jint);
+    const uint32_t elem_size = type2aelembytes(eltype);
+    const uint32_t group_elems = sizeof(jint) / elem_size;
+    const uint32_t chunk_elems = vl_bytes / elem_size;
+    const uint32_t pow_n_value = intpow(31U, chunk_elems);
+    const uint32_t pow_4n_value = intpow(31U, 4 * chunk_elems);
+
+    Label BYTE_VECTOR_LOOP, BYTE_SINGLE_PREP, BYTE_SINGLE_LOOP,
+          CHAR_VECTOR_LOOP, CHAR_SINGLE_PREP, CHAR_SINGLE_LOOP,
+          REDUCE, TAIL, TAIL_LOOP, DONE, POWERS, COEF_H, COEF_B;
+
+    assert(vl_bytes >= 16 && is_power_of_2(vl_bytes), "unexpected SVE vector length");
+    assert(is_power_of_2(lanes), "unexpected lane count");
+    assert(group_elems == 4 || group_elems == 2, "unexpected grouping");
+
+    __ align(CodeEntryAlignment);
+
+    const char* mark_name = "";
+    switch (eltype) {
+    case T_BOOLEAN:
+      mark_name = "_large_arrays_hashcode_sve2_boolean";
+      break;
+    case T_BYTE:
+      mark_name = "_large_arrays_hashcode_sve2_byte";
+      break;
+    case T_CHAR:
+      mark_name = "_large_arrays_hashcode_sve2_char";
+      break;
+    case T_SHORT:
+      mark_name = "_large_arrays_hashcode_sve2_short";
+      break;
+    default:
+      mark_name = "_large_arrays_hashcode_sve2_incorrect_type";
+      ShouldNotReachHere();
+    };
+
+    StubCodeMark mark(this, "StubRoutines", mark_name);
+
+    address entry = __ pc();
+    __ enter();
+    __ sve_ptrue(pload, is_byte ? Assembler::B : Assembler::H);
+    __ sve_ptrue(pwords, Assembler::S);
+
+    __ movw(pow_n, pow_n_value);
+    __ sve_dup(zacc, Assembler::S, 0);
+    __ sve_dup(zacc1, Assembler::S, 0);
+    __ sve_dup(zacc2, Assembler::S, 0);
+    __ sve_dup(zacc3, Assembler::S, 0);
+    __ sve_dup(zpowm, Assembler::S, pow_n);
+
+    // Load the lane-weight table for the final reduction. pow_n is a table
+    // address in this short section, not a polynomial multiplier.
+    __ adr(pow_n, POWERS);
+    __ sve_ldr(zpow, Address(pow_n, 0));
+
+    // Load the widening-multiply coefficient vectors. coef_h is always used;
+    // coef_b is only used by the byte path's first folding step.
+    __ adr(pow_n, COEF_H);
+    __ sve_ldr(zcoef_h, Address(pow_n, 0));
+    if (is_byte) {
+      __ adr(pow_n, COEF_B);
+      __ sve_ldr(zcoef_b, Address(pow_n, 0));
+    }
+    // Restore pow_n to 31^chunk_elems after the table loads.
+    __ movw(pow_n, pow_n_value);
+
+    __ lsr(tmp, cnt, exact_log2(chunk_elems));
+    __ cbz(tmp, TAIL);
+
+    // Let H(Ci) be the S-lane vector of per-group hashes for SVE chunk i.
+    // The 4x loop accumulates four interleaved streams:
+    //   zacc  = H(C0), H(C4), H(C8), ...
+    //   zacc1 = H(C1), H(C5), H(C9), ...
+    //   zacc2 = H(C2), H(C6), H(C10), ...
+    //   zacc3 = H(C3), H(C7), H(C11), ...
+    // Each stream advances by 31^(4*chunk_elems). After the loop we merge
+    // them with 31^chunk_elems to recover the original chunk order, and
+    // result is multiplied by the same 31^(full_vector_elements) factor as
+    // chunks are consumed, so final reduction only has to add the vector sum.
+#define SVE2_MULLB(Zd, T, Zn, Zm)                              \
+    do {                                                       \
+      if (is_signed) {                                         \
+        __ sve_smullb(Zd, T, Zn, Zm);                          \
+      } else {                                                 \
+        __ sve_umullb(Zd, T, Zn, Zm);                          \
+      }                                                        \
+    } while (0)
+
+#define SVE2_MLALT(Zd, T, Zn, Zm)                              \
+    do {                                                       \
+      if (is_signed) {                                         \
+        __ sve_smlalt(Zd, T, Zn, Zm);                          \
+      } else {                                                 \
+        __ sve_umlalt(Zd, T, Zn, Zm);                          \
+      }                                                        \
+    } while (0)
+
+    if (is_byte) {
+      // Run groups of four full SVE byte vectors through independent
+      // accumulators. Each chunk still uses the same two-stage B->H->S fold;
+      // the unroll shortens the outer hash dependency chain.
+      __ lsr(tmp, tmp, 2);
+      __ cbz(tmp, BYTE_SINGLE_PREP);
+
+      // The 4x loop advances each interleaved accumulator by
+      // 31^(4*chunk_elems), so pow_n temporarily uses that larger factor.
+      __ movw(pow_n, pow_4n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+
+      __ bind(BYTE_VECTOR_LOOP);
+      __ sve_ld1b(zraw, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1b(zraw_alt, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc1, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc2, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc3, Assembler::S, pwords, zpowm);
+      SVE2_MULLB(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MULLB(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MLALT(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MLALT(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MULLB(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MULLB(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MLALT(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+      __ sve_add(zacc1, Assembler::S, pwords, zraw_alt);
+
+      __ sve_ld1b(zraw, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1b(zraw_alt, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      SVE2_MULLB(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MULLB(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MLALT(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MLALT(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MULLB(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MULLB(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MLALT(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      __ sve_add(zacc2, Assembler::S, pwords, zs);
+      __ sve_add(zacc3, Assembler::S, pwords, zraw_alt);
+
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, BYTE_VECTOR_LOOP);
+
+      // Merge the four strided accumulators back into the original chunk order:
+      // (((acc0 * 31^chunk_elems + acc1) * 31^chunk_elems + acc2)
+      //     * 31^chunk_elems + acc3).
+      __ movw(pow_n, pow_n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc1);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc2);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc3);
+
+      __ bind(BYTE_SINGLE_PREP);
+      __ lsr(tmp, cnt, exact_log2(chunk_elems));
+      __ andr(tmp, tmp, 3);
+      __ cbz(tmp, REDUCE);
+
+      __ bind(BYTE_SINGLE_LOOP);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_ld1b(zraw, Assembler::B, pload, Address(ary, 0));
+      // First widening step: B*B -> H. With coef_b = [31,1,31,1,...] as bytes,
+      //   MULLB.H produces  zh.H[i]  = zraw.B[2i]   * 31
+      //   MLALT.H accumulates zh.H[i] += zraw.B[2i+1] * 1
+      // i.e. zh.H[i] = b(2i)*31 + b(2i+1).
+      SVE2_MULLB(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MLALT(zh, Assembler::H, zraw, zcoef_b);
+      // Second widening step: H*H -> S. With coef_h = [961,1,961,1,...] as halfwords,
+      //   MULLB.S produces  zs.S[i]  = zh.H[2i]   * 961
+      //   MLALT.S accumulates zs.S[i] += zh.H[2i+1] * 1
+      // i.e. zs.S[i] = b(4i)*31^3 + b(4i+1)*31^2 + b(4i+2)*31 + b(4i+3).
+      SVE2_MULLB(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zh, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+
+      __ add(ary, ary, vl_bytes);
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, BYTE_SINGLE_LOOP);
+    } else {
+      // Run groups of four full SVE vectors through four independent
+      // accumulators. This matches the polynomial order while shortening the
+      // per-accumulator dependency chain and amortizing loop overhead.
+      __ lsr(tmp, tmp, 2);
+      __ cbz(tmp, CHAR_SINGLE_PREP);
+
+      // The 4x loop advances each interleaved accumulator by
+      // 31^(4*chunk_elems), so pow_n temporarily uses that larger factor.
+      __ movw(pow_n, pow_4n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+
+      __ bind(CHAR_VECTOR_LOOP);
+      __ sve_ld1h(zraw, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1h(zraw_alt, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc1, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc2, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc3, Assembler::S, pwords, zpowm);
+      SVE2_MULLB(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MULLB(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MLALT(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+      __ sve_add(zacc1, Assembler::S, pwords, ztmp_alt);
+
+      __ sve_ld1h(zraw, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1h(zraw_alt, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      SVE2_MULLB(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MULLB(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MLALT(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      __ sve_add(zacc2, Assembler::S, pwords, zs);
+      __ sve_add(zacc3, Assembler::S, pwords, ztmp_alt);
+
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, CHAR_VECTOR_LOOP);
+
+      // Merge the four strided accumulators back into the original chunk order:
+      // (((acc0 * 31^chunk_elems + acc1) * 31^chunk_elems + acc2)
+      //     * 31^chunk_elems + acc3).
+      __ movw(pow_n, pow_n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc1);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc2);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc3);
+
+      __ bind(CHAR_SINGLE_PREP);
+      __ lsr(tmp, cnt, exact_log2(chunk_elems));
+      __ andr(tmp, tmp, 3);
+      __ cbz(tmp, REDUCE);
+
+      __ bind(CHAR_SINGLE_LOOP);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_ld1h(zraw, Assembler::H, pload, Address(ary, 0));
+      // Single widening step: H*H -> S. With coef_h = [31,1,31,1,...] as halfwords,
+      //   MULLB.S produces  zs.S[i]  = zraw.H[2i]   * 31
+      //   MLALT.S accumulates zs.S[i] += zraw.H[2i+1] * 1
+      // i.e. zs.S[i] = c(2i)*31 + c(2i+1).
+      SVE2_MULLB(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zraw, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+
+      __ add(ary, ary, vl_bytes);
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, CHAR_SINGLE_LOOP);
+    }
+#undef SVE2_MULLB
+#undef SVE2_MLALT
+
+    // Weighted lane reduction: each lane already represents group_elems
+    // source elements, so the weights jump by that.
+    __ bind(REDUCE);
+    __ sve_mul(zacc, Assembler::S, pwords, zpow);
+    __ sve_uaddv(zraw, Assembler::S, pwords, zacc);
+    __ umov(tmp, zraw, Assembler::S, 0);
+    __ addw(result, result, tmp);
+
+    __ bind(TAIL);
+    __ andr(cnt, cnt, chunk_elems - 1);
+    // The scalar tail consumes one element per iteration, so pow_n becomes
+    // the ordinary hash multiplier 31.
+    __ movw(pow_n, 0x1f);
+    __ bind(TAIL_LOOP);
+    __ cbz(cnt, DONE);
+    __ load(tmp, Address(__ post(ary, elem_size)), eltype);
+    __ maddw(result, result, pow_n, tmp);
+    __ subw(cnt, cnt, 1);
+    __ b(TAIL_LOOP);
+
+    __ bind(DONE);
+    __ reinitialize_ptrue();
+    __ leave();
+    __ ret(lr);
+
+    __ align((int)MAX2((uint32_t)16, vl_bytes));
+    __ bind(POWERS);
+    for (uint32_t i = 0; i < lanes; ++i) {
+      __ emit_int32(intpow(31U, group_elems * (lanes - 1 - i)));
+    }
+
+    // coef_h holds alternating [outer_coef, 1, outer_coef, 1, ...] halfwords:
+    // - byte path uses outer_coef = 31^2 = 961 (second-stage H*H -> S fold)
+    // - halfword path uses outer_coef = 31     (single H*H -> S fold)
+    __ align((int)MAX2((uint32_t)16, vl_bytes));
+    __ bind(COEF_H);
+    {
+      const uint16_t outer_coef = is_byte ? 961 : 31;
+      for (uint32_t i = 0; i < vl_bytes / sizeof(uint16_t); i += 2) {
+        __ emit_int16(outer_coef);
+        __ emit_int16(1);
+      }
+    }
+
+    if (is_byte) {
+      // coef_b = [31, 1, 31, 1, ...] bytes for the first B*B -> H fold.
+      __ align((int)MAX2((uint32_t)16, vl_bytes));
+      __ bind(COEF_B);
+      for (uint32_t i = 0; i < vl_bytes; i += 2) {
+        __ emit_int8(31);
+        __ emit_int8(1);
+      }
+    }
+
+    return entry;
+  }
+
   address generate_scalar_convert_utf8_to_utf16() {
 
     int dcache_line = VM_Version::dcache_line_size();
@@ -9380,6 +9725,12 @@ class StubGenerator: public StubCodeGenerator {
     StubRoutines::aarch64::_large_arrays_hashcode_char = generate_large_arrays_hashcode(T_CHAR);
     StubRoutines::aarch64::_large_arrays_hashcode_int = generate_large_arrays_hashcode(T_INT);
     StubRoutines::aarch64::_large_arrays_hashcode_short = generate_large_arrays_hashcode(T_SHORT);
+    if (UseSVEHashCodeIntrinsic) {
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_boolean = generate_large_arrays_hashcode_sve2(T_BOOLEAN);
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_byte = generate_large_arrays_hashcode_sve2(T_BYTE);
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_char = generate_large_arrays_hashcode_sve2(T_CHAR);
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_short = generate_large_arrays_hashcode_sve2(T_SHORT);
+    }
 
     // byte_array_inflate stub for large arrays.
     StubRoutines::aarch64::_large_byte_array_inflate = generate_large_byte_array_inflate();

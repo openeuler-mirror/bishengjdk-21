@@ -69,6 +69,18 @@ static SpinWait get_spin_wait_desc() {
   return SpinWait{};
 }
 
+static void enable_hisilicon_sve2_intrinsic_defaults() {
+  if (FLAG_IS_DEFAULT(UseSVEHashCodeIntrinsic)) {
+    FLAG_SET_DEFAULT(UseSVEHashCodeIntrinsic, false);
+  }
+}
+
+static void enable_hisilicon_intrinsic_defaults() {
+  if (UseSVE >= 2) {
+    enable_hisilicon_sve2_intrinsic_defaults();
+  }
+}
+
 int VM_Version::get_cpu_model() {
   int cpu_lines = 0;
   if (FILE *f = fopen("/proc/cpuinfo", "r")) {
@@ -624,6 +636,16 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseVectorizedHashCodeIntrinsic, true);
   }
 #endif
+
+  const bool is_hisilicon_cpu = _cpu == CPU_HISILICON;
+  if (is_hisilicon_cpu) {
+    enable_hisilicon_intrinsic_defaults();
+  }
+
+  if (UseSVEHashCodeIntrinsic && (!is_hisilicon_cpu || UseSVE < 2)) {
+    warning("UseSVEHashCodeIntrinsic specified, but only available on HiSilicon CPUs with SVE2 enabled. Disabling.");
+    FLAG_SET_DEFAULT(UseSVEHashCodeIntrinsic, false);
+  }
 
   _spin_wait = get_spin_wait_desc();
 
