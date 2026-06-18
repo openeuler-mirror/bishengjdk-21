@@ -5903,6 +5903,7 @@ const int MacroAssembler::zero_words_block_size = 8;
 // cnt:   Count in HeapWords.
 //
 // ptr, cnt, rscratch1, and rscratch2 are clobbered.
+// C2 callers that select the SVE small block zeroing path also clobber v0 and p0.
 address MacroAssembler::zero_words(Register ptr, Register cnt)
 {
   assert(is_power_of_2(zero_words_block_size), "adjust this");
@@ -5927,7 +5928,11 @@ address MacroAssembler::zero_words(Register ptr, Register cnt)
         && Thread::current()->is_Compiler_thread()
         && (task = ciEnv::current()->task())
         && is_c2_compile(task->comp_level())) {
-      address tpc = trampoline_call(zero_blocks);
+      RuntimeAddress c2_zero_blocks = RuntimeAddress(UseSVESmallBlockZeroing ?
+                                                     StubRoutines::aarch64::zero_blocks_sve() :
+                                                     StubRoutines::aarch64::zero_blocks());
+      assert(c2_zero_blocks.target() != nullptr, "zero_blocks stub has not been generated");
+      address tpc = trampoline_call(c2_zero_blocks);
       if (tpc == nullptr) {
         DEBUG_ONLY(reset_labels(around));
         return nullptr;

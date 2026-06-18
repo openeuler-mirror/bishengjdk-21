@@ -60,6 +60,7 @@ class aarch64 {
   static address _double_sign_flip;
 
   static address _zero_blocks;
+  static address _zero_blocks_sve;
 
   static address _large_array_equals;
   static address _large_arrays_hashcode_boolean;
@@ -154,6 +155,10 @@ class aarch64 {
 
   static address zero_blocks() {
     return _zero_blocks;
+  }
+
+  static address zero_blocks_sve() {
+    return _zero_blocks_sve;
   }
 
   static address count_positives() {

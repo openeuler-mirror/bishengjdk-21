@@ -121,6 +121,12 @@ define_pd_global(intx, InlineSmallCode,          1000);
           "bulk arraycopy stub with streaming prefetch after the inline "\
           "small-copy path")                                            \
           range(0, max_jint)                                            \
+  product(bool, UseSVESmallBlockZeroing, false,                         \
+          "Use SVE stores in the C2 zeroing stub path for bounded small "\
+          "clears")                                                     \
+  product(uint, SVESmallBlockZeroingMaxWords, 256, DIAGNOSTIC,          \
+          "Maximum HeapWords cleared by the small SVE zeroing path")     \
+          range(0, max_jint)                                            \
   product(uint, SVEHashCodeStubMinVectorChunks, 1, DIAGNOSTIC,          \
           "Minimum number of full SVE vector chunks before using SVE2 "  \
           "hashcode stubs")                                             \

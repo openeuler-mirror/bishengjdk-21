@@ -15448,6 +15448,7 @@ instruct MoveL2D_reg_reg(vRegD dst, iRegL src) %{
 
 instruct clearArray_reg_reg(iRegL_R11 cnt, iRegP_R10 base, Universe dummy, rFlagsReg cr)
 %{
+  predicate(!UseSVESmallBlockZeroing);
   match(Set dummy (ClearArray cnt base));
   effect(USE_KILL cnt, USE_KILL base, KILL cr);
 
@@ -15457,6 +15458,27 @@ instruct clearArray_reg_reg(iRegL_R11 cnt, iRegP_R10 base, Universe dummy, rFlag
   ins_encode %{
     address tpc = __ zero_words($base$$Register, $cnt$$Register);
     if (tpc == NULL) {
+      ciEnv::current()->record_failure("CodeCache is full");
+      return;
+    }
+  %}
+
+  ins_pipe(pipe_class_memory);
+%}
+
+instruct clearArray_reg_reg_sve(iRegL_R11 cnt, iRegP_R10 base, Universe dummy,
+                                vRegA_V0 vtmp0, pRegGov_P0 ptmp0, rFlagsReg cr)
+%{
+  predicate(UseSVESmallBlockZeroing);
+  match(Set dummy (ClearArray cnt base));
+  effect(USE_KILL cnt, USE_KILL base, TEMP vtmp0, TEMP ptmp0, KILL cr);
+
+  ins_cost(4 * INSN_COST);
+  format %{ "ClearArray $cnt, $base" %}
+
+  ins_encode %{
+    address tpc = __ zero_words($base$$Register, $cnt$$Register);
+    if (tpc == nullptr) {
       ciEnv::current()->record_failure("CodeCache is full");
       return;
     }

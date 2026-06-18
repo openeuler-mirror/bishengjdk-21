@@ -76,6 +76,15 @@ static void enable_hisilicon_neon_intrinsic_defaults(bool is_hisilicon_950) {
   }
 }
 
+static void enable_hisilicon_sve1_intrinsic_defaults(bool is_hisilicon_950) {
+  if (!is_hisilicon_950) {
+    return;
+  }
+  if (FLAG_IS_DEFAULT(UseSVESmallBlockZeroing)) {
+    FLAG_SET_DEFAULT(UseSVESmallBlockZeroing, false);
+  }
+}
+
 static void enable_hisilicon_sve2_intrinsic_defaults() {
   if (FLAG_IS_DEFAULT(UseSVEHashCodeIntrinsic)) {
     FLAG_SET_DEFAULT(UseSVEHashCodeIntrinsic, false);
@@ -84,6 +93,9 @@ static void enable_hisilicon_sve2_intrinsic_defaults() {
 
 static void enable_hisilicon_intrinsic_defaults(bool is_hisilicon_950) {
   enable_hisilicon_neon_intrinsic_defaults(is_hisilicon_950);
+  if (UseSVE >= 1) {
+    enable_hisilicon_sve1_intrinsic_defaults(is_hisilicon_950);
+  }
   if (UseSVE >= 2) {
     enable_hisilicon_sve2_intrinsic_defaults();
   }
@@ -664,6 +676,18 @@ void VM_Version::initialize() {
       warning("UseStreamPrefetchForArrayCopy specified, but only available on HiSilicon 950 CPUs. Disabling.");
     }
     FLAG_SET_DEFAULT(UseStreamPrefetchForArrayCopy, false);
+  }
+  if (UseSVESmallBlockZeroing && UseSVE == 0) {
+    if (!FLAG_IS_DEFAULT(UseSVESmallBlockZeroing)) {
+      warning("UseSVESmallBlockZeroing specified, but SVE is not available. Disabling.");
+    }
+    FLAG_SET_DEFAULT(UseSVESmallBlockZeroing, false);
+  }
+  if (UseSVESmallBlockZeroing && !is_hisilicon_950) {
+    if (!FLAG_IS_DEFAULT(UseSVESmallBlockZeroing)) {
+      warning("UseSVESmallBlockZeroing specified, but only available on HiSilicon 950 CPUs. Disabling.");
+    }
+    FLAG_SET_DEFAULT(UseSVESmallBlockZeroing, false);
   }
   if (UseSVEHashCodeIntrinsic && (!is_hisilicon_cpu || UseSVE < 2)) {
     warning("UseSVEHashCodeIntrinsic specified, but only available on HiSilicon CPUs with SVE2 enabled. Disabling.");

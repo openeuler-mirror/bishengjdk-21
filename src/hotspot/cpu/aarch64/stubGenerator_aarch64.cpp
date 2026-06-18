@@ -650,15 +650,87 @@ class StubGenerator: public StubCodeGenerator {
   // r11: the number of words in the tail.
   //      r11 < MacroAssembler::zero_words_block_size.
 
-  address generate_zero_blocks() {
+  // Emit a whole-range SVE zeroing path. It follows the zero_blocks
+  // contract by setting cnt to zero and base to the end of the cleared range.
+  void generate_sve_zero_block(Register base, Register cnt, Label& fallback,
+                               uint min_words, uint max_words) {
+    Label sve_full_loop, sve_tail, sve_done;
+    const Register idx = rscratch1;
+    const Register full_end = rscratch2;
+    uint32_t vl_words = VM_Version::get_initial_sve_vector_length() >> LogBytesPerWord;
+
+    assert(vl_words > 0 && is_power_of_2(vl_words), "unexpected SVE vector length");
+    if (min_words > 0) {
+      assert(min_words <= 255, "small-block lower bound must fit in an immediate");
+      __ cmp(cnt, (u1)min_words);
+      __ br(Assembler::LO, fallback);
+    }
+    if (max_words > 0) {
+      __ mov(idx, max_words);
+      __ cmp(cnt, idx);
+      __ br(Assembler::HI, fallback);
+    }
+
+    __ sve_dup(v0, Assembler::D, 0);
+    __ mov(idx, zr);
+    __ andr(full_end, cnt, -vl_words);
+    __ cbz(full_end, sve_tail);
+    __ sve_ptrue(p0, Assembler::D);
+
+    __ bind(sve_full_loop);
+    __ sve_st1d(v0, Assembler::D, p0, Address(base, idx, Address::lsl(LogBytesPerWord)));
+    __ sve_inc(idx, Assembler::D);
+    __ cmp(idx, full_end);
+    __ br(Assembler::LO, sve_full_loop);
+
+    __ cmp(idx, cnt);
+    __ br(Assembler::EQ, sve_done);
+
+    __ bind(sve_tail);
+    __ sve_whilelo(p0, Assembler::D, idx, cnt);
+    __ sve_st1d(v0, Assembler::D, p0, Address(base, idx, Address::lsl(LogBytesPerWord)));
+
+    __ bind(sve_done);
+    __ add(base, base, cnt, Assembler::LSL, LogBytesPerWord);
+    __ mov(cnt, zr);
+    __ ret(lr);
+  }
+
+  // zero_blocks follows the JDK zero_words() stub contract:
+  //
+  //   input:  r10 = base, r11 = cnt in HeapWords
+  //   output: r10/r11 adjusted to any remaining tail
+  //
+  // Small clears can avoid the fixed setup cost of the generic DC ZVA path by
+  // using predicated SVE stores for a bounded word range:
+  //
+  //   16..SVESmallBlockZeroingMaxWords words:
+  //     whole-range SVE st1d stores
+  //
+  //   otherwise:
+  //     original JDK zero_blocks path
+  address generate_zero_blocks(address* sve_entry) {
     Label done;
     Label base_aligned;
+    Label regular_entry;
 
     Register base = r10, cnt = r11;
 
     __ align(CodeEntryAlignment);
+    *sve_entry = nullptr;
+
+    if (UseSVESmallBlockZeroing && SVESmallBlockZeroingMaxWords > 0) {
+      StubCodeMark mark(this, "StubRoutines", "zero_blocks_sve");
+      *sve_entry = __ pc();
+      generate_sve_zero_block(base, cnt, regular_entry, 16, SVESmallBlockZeroingMaxWords);
+    }
+
     StubCodeMark mark(this, "StubRoutines", "zero_blocks");
+    __ bind(regular_entry);
     address start = __ pc();
+    if (*sve_entry == nullptr) {
+      *sve_entry = start;
+    }
 
     if (UseBlockZeroing) {
       int zva_length = VM_Version::zva_length();
@@ -2692,7 +2764,7 @@ class StubGenerator: public StubCodeGenerator {
     generate_copy_longs(IN_HEAP | IS_ARRAY | IS_DEST_UNINITIALIZED, T_OBJECT, copy_obj_uninit_f, r0, r1, r15, copy_forwards);
     generate_copy_longs(IN_HEAP | IS_ARRAY | IS_DEST_UNINITIALIZED, T_OBJECT, copy_obj_uninit_b, r0, r1, r15, copy_backwards);
 
-    StubRoutines::aarch64::_zero_blocks = generate_zero_blocks();
+    StubRoutines::aarch64::_zero_blocks = generate_zero_blocks(&StubRoutines::aarch64::_zero_blocks_sve);
 
     //*** jbyte
     // Always need aligned and unaligned versions
