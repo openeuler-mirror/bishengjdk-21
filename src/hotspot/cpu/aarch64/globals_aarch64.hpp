@@ -113,6 +113,14 @@ define_pd_global(intx, InlineSmallCode,          1000);
           range(0, 2)                                                   \
   product(bool, UseSVEHashCodeIntrinsic, false,                         \
           "Use SVE2 instructions in the vectorized hashcode intrinsic") \
+  product(bool, UseStreamPrefetchForArrayCopy, false,                   \
+          "Use ASIMD forward bulk arraycopy stub with streaming "        \
+          "prefetch")                                                   \
+  product(uint, StreamPrefetchArrayCopyMinLongs, 16, DIAGNOSTIC,        \
+          "Minimum number of long elements before using ASIMD forward "  \
+          "bulk arraycopy stub with streaming prefetch after the inline "\
+          "small-copy path")                                            \
+          range(0, max_jint)                                            \
   product(uint, SVEHashCodeStubMinVectorChunks, 1, DIAGNOSTIC,          \
           "Minimum number of full SVE vector chunks before using SVE2 "  \
           "hashcode stubs")                                             \

@@ -1123,6 +1123,105 @@ class StubGenerator: public StubCodeGenerator {
       }
   }
 
+  // Prefetching forward copy for long[] bulk arraycopy.
+  //
+  // copy_memory() handles tiny copies inline before this bulk stub is reached.
+  // Keep this stub focused on the remaining forward-copy ranges: ASIMD
+  // q-register fixed-size copies up to 128 bytes and a prefetching 64-byte
+  // ASIMD software pipeline for larger copies.
+  void generate_copy_longs_pf(Label &start, Register s, Register d, Register count) {
+    const Register bulk_words = r3, bytes = r4, srcend = r5, dstend = r6;
+    const Register tmp = r7, dst = rscratch1;
+    Label copy_short, copy96_128, copy96, loop64, copy64_from_end, done;
+
+    assert_different_registers(s, d, count, bulk_words, bytes, srcend, dstend, tmp, dst);
+
+    __ align(CodeEntryAlignment);
+
+    StubCodeMark mark(this, "StubRoutines", "forward_copy_longs_pf");
+
+    __ bind(start);
+
+#ifdef ASSERT
+    // Make sure we are never given < 8 words.
+    {
+      Label L;
+      __ cmp(count, (u1)8);
+      __ br(Assembler::GE, L);
+      __ stop("forward_copy_longs_pf called with < 8 words");
+      __ bind(L);
+    }
+#endif
+
+    // Keep the same contract as generate_copy_longs(): copy all but the low
+    // count bit, and leave s/d at the remaining word for copy_memory_small().
+    __ andr(bulk_words, count, -2);
+    __ lsl(bytes, bulk_words, LogBytesPerWord);
+    __ add(srcend, s, bytes);
+    __ add(dstend, d, bytes);
+
+    __ cmp(bytes, (u1)128);
+    __ br(Assembler::LS, copy_short);
+
+    __ ldrq(v3, Address(s, 0));
+    __ andr(tmp, s, 15);
+    __ andr(s, s, -16);
+    __ sub(dst, d, tmp);
+    __ add(bytes, bytes, tmp);
+    __ ldpq(v0, v1, Address(s, 16));
+    __ strq(v3, Address(d, 0));
+    __ ldpq(v2, v3, Address(s, 48));
+    __ subs(bytes, bytes, 128 + 16);
+    __ br(Assembler::LS, copy64_from_end);
+
+    __ bind(loop64);
+    __ prfm(Address(s, 144), PLDL1STRM);
+    __ stpq(v0, v1, Address(dst, 16));
+    __ ldpq(v0, v1, Address(s, 80));
+    __ stpq(v2, v3, Address(dst, 48));
+    __ ldpq(v2, v3, Address(s, 112));
+    __ add(s, s, 64);
+    __ add(dst, dst, 64);
+    __ subs(bytes, bytes, 64);
+    __ br(Assembler::HI, loop64);
+
+    __ bind(copy64_from_end);
+    __ ldpq(v4, v5, Address(srcend, -64));
+    __ stpq(v0, v1, Address(dst, 16));
+    __ ldpq(v0, v1, Address(srcend, -32));
+    __ stpq(v2, v3, Address(dst, 48));
+    __ stpq(v4, v5, Address(dstend, -64));
+    __ stpq(v0, v1, Address(dstend, -32));
+
+    __ bind(done);
+    __ mov(s, srcend);
+    __ mov(d, dstend);
+    __ ret(lr);
+
+    __ bind(copy_short);
+    __ ldpq(v0, v1, Address(s, 0));
+    __ ldpq(v2, v3, Address(srcend, -32));
+    __ cmp(bytes, (u1)64);
+    __ br(Assembler::HI, copy96_128);
+
+    __ stpq(v0, v1, Address(d, 0));
+    __ stpq(v2, v3, Address(dstend, -32));
+    __ b(done);
+
+    __ bind(copy96_128);
+    __ ldpq(v4, v5, Address(s, 32));
+    __ cmp(bytes, (u1)96);
+    __ br(Assembler::LS, copy96);
+    __ ldpq(v6, v7, Address(srcend, -64));
+    __ stpq(v6, v7, Address(dstend, -64));
+
+    __ bind(copy96);
+    __ stpq(v0, v1, Address(d, 0));
+    __ stpq(v4, v5, Address(d, 32));
+    __ stpq(v2, v3, Address(dstend, -32));
+    __ b(done);
+  }
+
   // Small copy: less than 16 bytes.
   //
   // NB: Ignores all of the bits of count which represent more than 15
@@ -1174,7 +1273,7 @@ class StubGenerator: public StubCodeGenerator {
     }
   }
 
-  Label copy_f, copy_b;
+  Label copy_f, copy_b, copy_f_pf;
   Label copy_obj_f, copy_obj_b;
   Label copy_obj_uninit_f, copy_obj_uninit_b;
 
@@ -1407,7 +1506,19 @@ class StubGenerator: public StubCodeGenerator {
     __ lsr(r15, count, exact_log2(wordSize/granularity));
     if (direction == copy_forwards) {
       if (type != T_OBJECT) {
-        __ bl(copy_f);
+        if (UseStreamPrefetchForArrayCopy) {
+          Label copy_default, copy_done;
+          __ mov(rscratch1, StreamPrefetchArrayCopyMinLongs);
+          __ cmp(r15, rscratch1);
+          __ br(Assembler::LT, copy_default);
+          __ bl(copy_f_pf);
+          __ b(copy_done);
+          __ bind(copy_default);
+          __ bl(copy_f);
+          __ bind(copy_done);
+        } else {
+          __ bl(copy_f);
+        }
       } else if ((decorators & IS_DEST_UNINITIALIZED) != 0) {
         __ bl(copy_obj_uninit_f);
       } else {
@@ -2571,6 +2682,9 @@ class StubGenerator: public StubCodeGenerator {
 
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_BYTE, copy_f, r0, r1, r15, copy_forwards);
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_BYTE, copy_b, r0, r1, r15, copy_backwards);
+    if (UseStreamPrefetchForArrayCopy) {
+      generate_copy_longs_pf(copy_f_pf, r0, r1, r15);
+    }
 
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_OBJECT, copy_obj_f, r0, r1, r15, copy_forwards);
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_OBJECT, copy_obj_b, r0, r1, r15, copy_backwards);

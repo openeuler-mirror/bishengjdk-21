@@ -69,13 +69,21 @@ static SpinWait get_spin_wait_desc() {
   return SpinWait{};
 }
 
+static void enable_hisilicon_neon_intrinsic_defaults(bool is_hisilicon_950) {
+  if (is_hisilicon_950 &&
+      FLAG_IS_DEFAULT(UseStreamPrefetchForArrayCopy)) {
+    FLAG_SET_DEFAULT(UseStreamPrefetchForArrayCopy, false);
+  }
+}
+
 static void enable_hisilicon_sve2_intrinsic_defaults() {
   if (FLAG_IS_DEFAULT(UseSVEHashCodeIntrinsic)) {
     FLAG_SET_DEFAULT(UseSVEHashCodeIntrinsic, false);
   }
 }
 
-static void enable_hisilicon_intrinsic_defaults() {
+static void enable_hisilicon_intrinsic_defaults(bool is_hisilicon_950) {
+  enable_hisilicon_neon_intrinsic_defaults(is_hisilicon_950);
   if (UseSVE >= 2) {
     enable_hisilicon_sve2_intrinsic_defaults();
   }
@@ -638,10 +646,25 @@ void VM_Version::initialize() {
 #endif
 
   const bool is_hisilicon_cpu = _cpu == CPU_HISILICON;
+  const bool is_hisilicon_950 =
+      is_hisilicon_cpu &&
+      VM_Version::model_is(CPU_MODEL_HISILICON_950);
   if (is_hisilicon_cpu) {
-    enable_hisilicon_intrinsic_defaults();
+    enable_hisilicon_intrinsic_defaults(is_hisilicon_950);
   }
 
+  if (UseStreamPrefetchForArrayCopy && AvoidUnalignedAccesses) {
+    if (!FLAG_IS_DEFAULT(UseStreamPrefetchForArrayCopy)) {
+      warning("UseStreamPrefetchForArrayCopy specified, but requires unaligned memory accesses. Disabling.");
+    }
+    FLAG_SET_DEFAULT(UseStreamPrefetchForArrayCopy, false);
+  }
+  if (UseStreamPrefetchForArrayCopy && !is_hisilicon_950) {
+    if (!FLAG_IS_DEFAULT(UseStreamPrefetchForArrayCopy)) {
+      warning("UseStreamPrefetchForArrayCopy specified, but only available on HiSilicon 950 CPUs. Disabling.");
+    }
+    FLAG_SET_DEFAULT(UseStreamPrefetchForArrayCopy, false);
+  }
   if (UseSVEHashCodeIntrinsic && (!is_hisilicon_cpu || UseSVE < 2)) {
     warning("UseSVEHashCodeIntrinsic specified, but only available on HiSilicon CPUs with SVE2 enabled. Disabling.");
     FLAG_SET_DEFAULT(UseSVEHashCodeIntrinsic, false);
