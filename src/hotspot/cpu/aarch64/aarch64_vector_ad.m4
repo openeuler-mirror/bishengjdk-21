@@ -361,6 +361,155 @@ VECTOR_LOAD_STORE(store, 8,  src, 64,  D)
 VECTOR_LOAD_STORE(load,  16, dst, 128, Q)
 VECTOR_LOAD_STORE(store, 16, src, 128, Q)
 
+instruct storeV_vcastDtoS_sve8(vmem8 mem, vReg src, vReg tmp) %{
+  predicate(UseSVE > 0 &&
+            MaxVectorSize == 32 &&
+            n->as_StoreVector()->memory_size() == 8 &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)) == T_SHORT &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == T_DOUBLE &&
+            Matcher::vector_length_in_bytes(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == MaxVectorSize);
+  match(Set mem (StoreVector mem (VectorCastD2X src)));
+  effect(TEMP_DEF tmp);
+  format %{ "storeV_vcastDtoS_sve8 $mem, $src\t# KILL $tmp" %}
+  ins_encode %{
+    __ sve_fcvtzs($tmp$$FloatRegister, __ S, ptrue, $src$$FloatRegister, __ D);
+
+    Register base = as_Register($mem$$base);
+    int index = $mem$$index;
+    int scale = $mem$$scale;
+    int disp = $mem$$disp;
+    if (index == -1) {
+      if (disp == 0) {
+        __ sve_st1h($tmp$$FloatRegister, __ D, ptrue, Address(base));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ sve_st1h($tmp$$FloatRegister, __ D, ptrue, Address(rscratch1));
+      }
+    } else {
+      Register index_reg = as_Register(index);
+      if (disp == 0) {
+        __ lea(rscratch1, Address(base, index_reg, Address::lsl(scale)));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ lea(rscratch1, Address(rscratch1, index_reg, Address::lsl(scale)));
+      }
+      __ sve_st1h($tmp$$FloatRegister, __ D, ptrue, Address(rscratch1));
+    }
+  %}
+  ins_pipe(pipe_slow);
+%}
+
+instruct storeV_vcastDtoF_sve16(vmem16 mem, vReg src, vReg tmp) %{
+  predicate(UseSVE > 0 &&
+            MaxVectorSize == 32 &&
+            n->as_StoreVector()->memory_size() == 16 &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)) == T_FLOAT &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == T_DOUBLE &&
+            Matcher::vector_length_in_bytes(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == MaxVectorSize);
+  match(Set mem (StoreVector mem (VectorCastD2X src)));
+  effect(TEMP_DEF tmp);
+  format %{ "storeV_vcastDtoF_sve16 $mem, $src\t# KILL $tmp" %}
+  ins_encode %{
+    __ sve_fcvt($tmp$$FloatRegister, __ S, ptrue, $src$$FloatRegister, __ D);
+
+    Register base = as_Register($mem$$base);
+    int index = $mem$$index;
+    int scale = $mem$$scale;
+    int disp = $mem$$disp;
+    if (index == -1) {
+      if (disp == 0) {
+        __ sve_st1w($tmp$$FloatRegister, __ D, ptrue, Address(base));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ sve_st1w($tmp$$FloatRegister, __ D, ptrue, Address(rscratch1));
+      }
+    } else {
+      Register index_reg = as_Register(index);
+      if (disp == 0) {
+        __ lea(rscratch1, Address(base, index_reg, Address::lsl(scale)));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ lea(rscratch1, Address(rscratch1, index_reg, Address::lsl(scale)));
+      }
+      __ sve_st1w($tmp$$FloatRegister, __ D, ptrue, Address(rscratch1));
+    }
+  %}
+  ins_pipe(pipe_slow);
+%}
+
+instruct storeV_vcastLtoF_sve16(vmem16 mem, vReg src, vReg tmp) %{
+  predicate(UseSVE > 0 &&
+            MaxVectorSize == 32 &&
+            n->as_StoreVector()->memory_size() == 16 &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)) == T_FLOAT &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == T_LONG &&
+            Matcher::vector_length_in_bytes(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == MaxVectorSize);
+  match(Set mem (StoreVector mem (VectorCastL2X src)));
+  effect(TEMP_DEF tmp);
+  format %{ "storeV_vcastLtoF_sve16 $mem, $src\t# KILL $tmp" %}
+  ins_encode %{
+    __ sve_scvtf($tmp$$FloatRegister, __ S, ptrue, $src$$FloatRegister, __ D);
+
+    Register base = as_Register($mem$$base);
+    int index = $mem$$index;
+    int scale = $mem$$scale;
+    int disp = $mem$$disp;
+    if (index == -1) {
+      if (disp == 0) {
+        __ sve_st1w($tmp$$FloatRegister, __ D, ptrue, Address(base));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ sve_st1w($tmp$$FloatRegister, __ D, ptrue, Address(rscratch1));
+      }
+    } else {
+      Register index_reg = as_Register(index);
+      if (disp == 0) {
+        __ lea(rscratch1, Address(base, index_reg, Address::lsl(scale)));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ lea(rscratch1, Address(rscratch1, index_reg, Address::lsl(scale)));
+      }
+      __ sve_st1w($tmp$$FloatRegister, __ D, ptrue, Address(rscratch1));
+    }
+  %}
+  ins_pipe(pipe_slow);
+%}
+
+instruct storeV_vcastLtoB_sve4(vmem4 mem, vReg src) %{
+  predicate(UseSVE > 0 &&
+            MaxVectorSize == 32 &&
+            n->as_StoreVector()->memory_size() == 4 &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)) == T_BYTE &&
+            Matcher::vector_element_basic_type(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == T_LONG &&
+            Matcher::vector_length_in_bytes(n->as_StoreVector()->in(MemNode::ValueIn)->in(1)) == MaxVectorSize);
+  match(Set mem (StoreVector mem (VectorCastL2X src)));
+  format %{ "storeV_vcastLtoB_sve4 $mem, $src" %}
+  ins_encode %{
+    Register base = as_Register($mem$$base);
+    int index = $mem$$index;
+    int scale = $mem$$scale;
+    int disp = $mem$$disp;
+    if (index == -1) {
+      if (disp == 0) {
+        __ sve_st1b($src$$FloatRegister, __ D, ptrue, Address(base));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ sve_st1b($src$$FloatRegister, __ D, ptrue, Address(rscratch1));
+      }
+    } else {
+      Register index_reg = as_Register(index);
+      if (disp == 0) {
+        __ lea(rscratch1, Address(base, index_reg, Address::lsl(scale)));
+      } else {
+        __ lea(rscratch1, Address(base, disp));
+        __ lea(rscratch1, Address(rscratch1, index_reg, Address::lsl(scale)));
+      }
+      __ sve_st1b($src$$FloatRegister, __ D, ptrue, Address(rscratch1));
+    }
+  %}
+  ins_pipe(pipe_slow);
+%}
+
 // Load Vector (> 128 bits)
 instruct loadV(vReg dst, vmemA mem) %{
   predicate(n->as_LoadVector()->memory_size() > 16);
