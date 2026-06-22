@@ -1048,9 +1048,99 @@ Node* VectorNode::try_to_gen_masked_vector(PhaseGVN* gvn, Node* node, const Type
   }
 }
 
+bool VectorNode::should_swap_inputs_to_help_global_value_numbering() {
+  // Predicated vector operations are sensitive to ordering of inputs.
+  // When the mask corresponding to a vector lane is false then
+  // the result of the operation is corresponding lane of its first operand.
+  //   i.e. RES = VEC1.lanewise(OPER, VEC2, MASK) is semantically equivalent to
+  //        RES = BLEND(VEC1, VEC1.lanewise(OPER, VEC2), MASK)
+  if (is_predicated_vector()) {
+    return false;
+  }
+
+  switch(Opcode()) {
+    case Op_AddVB:
+    case Op_AddVS:
+    case Op_AddVI:
+    case Op_AddVL:
+    case Op_AddVF:
+    case Op_AddVD:
+
+    case Op_MulVB:
+    case Op_MulVS:
+    case Op_MulVI:
+    case Op_MulVL:
+    case Op_MulVF:
+    case Op_MulVD:
+
+    case Op_MaxV:
+    case Op_MinV:
+    case Op_XorV:
+    case Op_OrV:
+    case Op_AndV:
+
+    case Op_AndVMask:
+    case Op_OrVMask:
+    case Op_XorVMask:
+
+      assert(req() == 3, "Must be a binary operation");
+      // For non-predicated commutative operations, sort the inputs in
+      // increasing order of node indices.
+      if (in(1)->_idx > in(2)->_idx) {
+        return true;
+      }
+      // fallthrough
+    default:
+      return false;
+  }
+}
+
+static bool collect_same_mulv_leaves(Node* n, int opc, Node*& leaf, uint& leaves, uint depth) {
+  // Keep this matcher intentionally small. It is only meant to recognize
+  // four equal integral vector operands, e.g. x*x*x*x.
+  if (depth > 3 || leaves > 4) {
+    return false;
+  }
+  if (n->Opcode() == opc) {
+    return collect_same_mulv_leaves(n->in(1), opc, leaf, leaves, depth + 1) &&
+           collect_same_mulv_leaves(n->in(2), opc, leaf, leaves, depth + 1);
+  }
+  if (leaf == nullptr) {
+    leaf = n;
+  }
+  if (leaf != n) {
+    return false;
+  }
+  leaves++;
+  return leaves <= 4;
+}
+
 Node* VectorNode::Ideal(PhaseGVN* phase, bool can_reshape) {
   if (Matcher::vector_needs_partial_operations(this, vect_type())) {
     return try_to_gen_masked_vector(phase, this, vect_type());
+  }
+
+  if (!is_predicated_vector() && Opcode() == Op_MulVL) {
+    Node* leaf = nullptr;
+    uint leaves = 0;
+    if (collect_same_mulv_leaves(this, Opcode(), leaf, leaves, 0) && leaves == 4) {
+      Node* square = nullptr;
+      if (in(1)->Opcode() == Opcode() && in(1)->in(1) == leaf && in(1)->in(2) == leaf) {
+        square = in(1);
+      } else if (in(2)->Opcode() == Opcode() && in(2)->in(1) == leaf && in(2)->in(2) == leaf) {
+        square = in(2);
+      } else {
+        square = phase->transform(VectorNode::make(Opcode(), leaf, leaf, vect_type()));
+      }
+      if (in(1) != square || in(2) != square) {
+        return VectorNode::make(Opcode(), square, square, vect_type());
+      }
+    }
+  }
+
+  // Sort inputs of commutative non-predicated vector operations to help value numbering.
+  if (should_swap_inputs_to_help_global_value_numbering()) {
+    swap_edges(1, 2);
   }
   return nullptr;
 }
