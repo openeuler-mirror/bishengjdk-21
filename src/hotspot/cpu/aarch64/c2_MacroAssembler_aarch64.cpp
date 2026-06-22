@@ -2029,6 +2029,32 @@ void C2_MacroAssembler::neon_reduce_mul_integral(Register dst, BasicType bt,
   BLOCK_COMMENT("} neon_reduce_mul_integral");
 }
 
+// Vector reduction multiply for integral type with SVE instructions.
+// Clobbers: rscratch1
+void C2_MacroAssembler::sve_reduce_mul_integral(Register dst, BasicType bt,
+                                                Register isrc, FloatRegister vsrc,
+                                                unsigned vector_length_in_bytes,
+                                                FloatRegister vtmp1, FloatRegister vtmp2) {
+  assert(bt == T_INT || bt == T_LONG, "unsupported element type");
+  assert(vector_length_in_bytes > 16 && vector_length_in_bytes % type2aelembytes(bt) == 0,
+         "unsupported vector length");
+  uint length = vector_length_in_bytes / type2aelembytes(bt);
+  assert((length & (length - 1)) == 0, "vector length must be power of 2");
+  assert_different_registers(isrc, dst);
+
+  BLOCK_COMMENT("sve_reduce_mul_integral {");
+    Assembler::SIMD_RegVariant size = elemType_to_regVariant(bt);
+    sve_orr(vtmp1, vsrc, vsrc);
+    for (uint step = length >> 1; step > 0; step >>= 1) {
+      sve_orr(vtmp2, vtmp1, vtmp1);
+      sve_ext(vtmp2, vtmp2, step * type2aelembytes(bt));
+      sve_mul(vtmp1, size, ptrue, vtmp2);
+    }
+    umov(rscratch1, vtmp1, size, 0);
+    mul(dst, isrc, rscratch1);
+  BLOCK_COMMENT("} sve_reduce_mul_integral");
+}
+
 // Vector reduction multiply for floating-point type with ASIMD instructions.
 void C2_MacroAssembler::neon_reduce_mul_fp(FloatRegister dst, BasicType bt,
                                            FloatRegister fsrc, FloatRegister vsrc,
