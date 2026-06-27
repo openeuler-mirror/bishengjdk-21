@@ -151,10 +151,14 @@ void CardTableBarrierSetC2::clone(GraphKit* kit, Node* src, Node* dst, Node* siz
   }
 }
 
-#endif /* ! AARCH64 */
 bool CardTableBarrierSetC2::use_ReduceInitialCardMarks() const {
   return ReduceInitialCardMarks;
 }
+#else /* AARCH64 */
+bool CardTableBarrierSetC2::use_ReduceInitialCardMarks() {
+  return ReduceInitialCardMarks;
+}
+#endif /* AARCH64 */
 
 #ifndef AARCH64
 bool CardTableBarrierSetC2::is_gc_barrier_node(Node* node) const {

@@ -33,7 +33,11 @@ G1FullGCResetMetadataTask::G1ResetMetadataClosure::G1ResetMetadataClosure(G1Full
 
 void G1FullGCResetMetadataTask::G1ResetMetadataClosure::reset_region_metadata(HeapRegion* hr) {
   hr->rem_set()->clear();
+#ifndef AARCH64
   hr->clear_cardtable();
+#else /* AARCH64 */
+  hr->clear_both_card_tables();
+#endif /* AARCH64 */
 }
 
 bool G1FullGCResetMetadataTask::G1ResetMetadataClosure::do_heap_region(HeapRegion* hr) {

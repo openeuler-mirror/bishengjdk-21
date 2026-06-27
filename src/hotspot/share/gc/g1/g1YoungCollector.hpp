@@ -46,7 +46,9 @@ class G1MonotonicArenaMemoryStats;
 class G1NewTracer;
 class G1ParScanThreadStateSet;
 class G1Policy;
+#ifndef AARCH64
 class G1RedirtyCardsQueueSet;
+#endif /* ! AARCH64 */
 class G1RemSet;
 class G1SurvivorRegions;
 class G1YoungGCEvacFailureInjector;
@@ -126,6 +128,10 @@ class G1YoungCollector {
   void post_evacuate_cleanup_2(G1ParScanThreadStateSet* per_thread_states,
                                G1EvacInfo* evacuation_info);
 
+#ifdef AARCH64
+  // Enqueue collection set candidates as root regions.
+  void enqueue_candidates_as_root_regions();
+#endif /* AARCH64 */
   void post_evacuate_collection_set(G1EvacInfo* evacuation_info,
                                     G1ParScanThreadStateSet* per_thread_states);
 

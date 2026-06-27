@@ -235,6 +235,8 @@ public class TestOptionsWithRanges {
          */
         excludeTestMaxRange("ConcGCThreads");
         excludeTestMaxRange("G1ConcRefinementThreads");
+        // G1UpdateBufferSize is obsolete only on AArch64 in this backport, so
+        // non-AArch64 must keep the max-range exclusion.
         excludeTestMaxRange("G1UpdateBufferSize");
         excludeTestMaxRange("InitialHeapSize");
         excludeTestMaxRange("MaxHeapSize");

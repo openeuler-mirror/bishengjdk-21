@@ -156,17 +156,20 @@
           "Before enqueueing them, each mutator thread tries to do some "   \
           "filtering on the SATB buffers it generates. If post-filtering "  \
           "the percentage of retained entries is over this threshold "      \
-          "the buffer will be enqueued for processing. A value of 0 "       \
-          "specifies that mutator threads should not do such filtering.")   \
+          "the buffer will be enqueued for processing.")                    \
           range(0, 100)                                                     \
                                                                             \
   product(intx, G1ExpandByPercentOfAvailable, 20, EXPERIMENTAL,             \
           "When expanding, % of uncommitted space to claim.")               \
           range(0, 100)                                                     \
                                                                             \
-  product(size_t, G1UpdateBufferSize, 256,                                  \
+  AARCH64_ONLY(product(size_t, G1PerThreadPendingCardThreshold, 256,        \
+          DIAGNOSTIC, "Number of pending cards allowed on the card table "  \
+          "per GC worker thread before considering starting refinement.")   \
+          range(0, UINT_MAX))                                               \
+  NOT_AARCH64(product(size_t, G1UpdateBufferSize, 256,                      \
           "Size of an update buffer")                                       \
-          range(1, NOT_LP64(32*M) LP64_ONLY(1*G))                           \
+          range(1, NOT_LP64(32*M) LP64_ONLY(1*G)))                          \
                                                                             \
   product(intx, G1RSetUpdatingPauseTimePercent, 10,                         \
           "A target percentage of time that is allowed to be spend on "     \
@@ -251,6 +254,12 @@
           "Regions with live bytes exceeding this will not be collected.")  \
           range(0, 100)                                                     \
                                                                             \
+  AARCH64_ONLY(product(uintx, G1RetainRegionLiveThresholdPercent, 85,       \
+          EXPERIMENTAL, "Threshold for evacuation failed regions to be "    \
+          "considered for inclusion in the collection set candidates."      \
+          "Regions with live bytes exceeding this will not be retained.")   \
+          range(0, 100))                                                    \
+                                                                            \
   product(uintx, G1HeapWastePercent, 5,                                     \
           "Amount of space, expressed as a percentage of the heap size, "   \
           "that G1 is willing not to collect to avoid expensive GCs.")      \
@@ -319,9 +328,21 @@
           range(1, 256)                                                     \
                                                                             \
   product(uint, G1NumCardsCostSampleThreshold, 1000, DIAGNOSTIC,            \
-          "Threshold for the number of cards when reporting card cost "     \
-          "related prediction sample. That sample must involve the same or "\
-          "more than that number of cards to be used.")                     \
+          "Threshold for the number of cards when reporting remembered set "\
+          "card cost related prediction samples. A sample must involve "    \
+          "the same or more than that number of cards to be used.")         \
+                                                                            \
+  AARCH64_ONLY(product(uint, G1NumCodeRootsCostSampleThreshold, 100,        \
+          DIAGNOSTIC, "Threshold for the number of code roots when "        \
+          "reporting code root scan cost related prediction samples. "      \
+          "A sample must involve the same or more than this number of code "\
+          "roots to be used."))                                             \
+                                                                            \
+  AARCH64_ONLY(develop(bool, G1ForceOptionalEvacuation, false,              \
+          "Force optional evacuation for all GCs where there are old gen "  \
+          "collection set candidates."                                      \
+          "Also schedule all available optional regions for evacuation "    \
+          "regardless of timing."))                                         \
                                                                             \
   GC_G1_EVACUATION_FAILURE_FLAGS(develop,                                   \
                     develop_pd,                                             \

@@ -34,10 +34,21 @@ class G1RemSet;
 // A G1RemSetSummary manages statistical information about the G1RemSet
 
 class G1RemSetSummary {
+#ifndef AARCH64
   size_t _num_vtimes;
   double* _rs_threads_vtimes;
+#else /* AARCH64 */
+  size_t _num_worker_threads;
+  jlong* _worker_threads_cpu_times;
+  jlong _control_thread_cpu_time;
+#endif /* AARCH64 */
 
+#ifndef AARCH64
   void set_rs_thread_vtime(uint thread, double value);
+#else /* AARCH64 */
+  void set_worker_thread_cpu_time(uint thread, jlong value);
+  void set_control_thread_cpu_time(jlong value);
+#endif /* AARCH64 */
 
   // update this summary with current data from various places
   void update();
@@ -54,7 +65,12 @@ public:
 
   void print_on(outputStream* out, bool show_thread_times);
 
+#ifndef AARCH64
   double rs_thread_vtime(uint thread) const;
+#else /* AARCH64 */
+  jlong worker_thread_cpu_time(uint thread) const;
+  jlong control_thread_cpu_time() const;
+#endif /* AARCH64 */
 };
 
 #endif // SHARE_GC_G1_G1REMSETSUMMARY_HPP

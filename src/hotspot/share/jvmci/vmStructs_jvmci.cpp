@@ -496,6 +496,7 @@
   declare_constant(BranchData::not_taken_off_set)                         \
                                                                           \
   declare_constant_with_value("CardTable::dirty_card", CardTable::dirty_card_val()) \
+  AARCH64_ONLY(declare_constant_with_value("CardTable::clean_card", CardTable::clean_card_val())) \
   declare_constant_with_value("LockStack::_end_offset", LockStack::end_offset()) \
                                                                           \
   declare_constant(CodeInstaller::VERIFIED_ENTRY)                         \
@@ -816,7 +817,7 @@
   declare_function(JVMCIRuntime::vm_error) \
   declare_function(JVMCIRuntime::load_and_clear_exception) \
   G1GC_ONLY(declare_function(JVMCIRuntime::write_barrier_pre)) \
-  G1GC_ONLY(declare_function(JVMCIRuntime::write_barrier_post)) \
+  NOT_AARCH64(G1GC_ONLY(declare_function(JVMCIRuntime::write_barrier_post))) \
   declare_function(JVMCIRuntime::validate_object) \
   \
   declare_function(JVMCIRuntime::test_deoptimize_call_int)
@@ -828,12 +829,13 @@
   static_field(HeapRegion, LogOfHRGrainBytes, int)
 
 #define VM_INT_CONSTANTS_JVMCI_G1GC(declare_constant, declare_constant_with_value, declare_preprocessor_constant) \
-  declare_constant_with_value("G1CardTable::g1_young_gen", G1CardTable::g1_young_card_val()) \
+  NOT_AARCH64(declare_constant_with_value("G1CardTable::g1_young_gen", G1CardTable::g1_young_card_val())) \
   declare_constant_with_value("G1ThreadLocalData::satb_mark_queue_active_offset", in_bytes(G1ThreadLocalData::satb_mark_queue_active_offset())) \
   declare_constant_with_value("G1ThreadLocalData::satb_mark_queue_index_offset", in_bytes(G1ThreadLocalData::satb_mark_queue_index_offset())) \
   declare_constant_with_value("G1ThreadLocalData::satb_mark_queue_buffer_offset", in_bytes(G1ThreadLocalData::satb_mark_queue_buffer_offset())) \
-  declare_constant_with_value("G1ThreadLocalData::dirty_card_queue_index_offset", in_bytes(G1ThreadLocalData::dirty_card_queue_index_offset())) \
-  declare_constant_with_value("G1ThreadLocalData::dirty_card_queue_buffer_offset", in_bytes(G1ThreadLocalData::dirty_card_queue_buffer_offset()))
+  AARCH64_ONLY(declare_constant_with_value("G1ThreadLocalData::card_table_base_offset", in_bytes(G1ThreadLocalData::card_table_base_offset()))) \
+  NOT_AARCH64(declare_constant_with_value("G1ThreadLocalData::dirty_card_queue_index_offset", in_bytes(G1ThreadLocalData::dirty_card_queue_index_offset()))) \
+  NOT_AARCH64(declare_constant_with_value("G1ThreadLocalData::dirty_card_queue_buffer_offset", in_bytes(G1ThreadLocalData::dirty_card_queue_buffer_offset())))
 
 #endif // INCLUDE_G1GC
 

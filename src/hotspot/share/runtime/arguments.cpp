@@ -531,6 +531,9 @@ static SpecialFlag const special_jvm_flags[] = {
   { "G1ConcRSHotCardLimit",         JDK_Version::undefined(), JDK_Version::jdk(21), JDK_Version::undefined() },
   { "RefDiscoveryPolicy",           JDK_Version::undefined(), JDK_Version::jdk(21), JDK_Version::undefined() },
   { "MetaspaceReclaimPolicy",       JDK_Version::undefined(), JDK_Version::jdk(21), JDK_Version::undefined() },
+#ifdef AARCH64
+  { "G1UpdateBufferSize",           JDK_Version::undefined(), JDK_Version::jdk(21), JDK_Version::jdk(22) },
+#endif /* AARCH64 */
 
 #ifdef ASSERT
   { "DummyObsoleteTestFlag",        JDK_Version::undefined(), JDK_Version::jdk(18), JDK_Version::undefined() },

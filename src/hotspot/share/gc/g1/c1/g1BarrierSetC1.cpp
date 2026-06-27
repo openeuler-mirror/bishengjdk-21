@@ -23,13 +23,24 @@
  */
 
 #include "precompiled.hpp"
-#include "c1/c1_LIRGenerator.hpp"
 #include "c1/c1_CodeStubs.hpp"
+#ifdef AARCH64
+#include "c1/c1_LIRAssembler.hpp"
+#endif /* AARCH64 */
+#include "c1/c1_LIRGenerator.hpp"
+#ifdef AARCH64
+#include "c1/c1_MacroAssembler.hpp"
+#endif /* AARCH64 */
 #include "gc/g1/c1/g1BarrierSetC1.hpp"
 #include "gc/g1/g1BarrierSet.hpp"
 #include "gc/g1/g1BarrierSetAssembler.hpp"
 #include "gc/g1/g1ThreadLocalData.hpp"
+#ifndef AARCH64
 #include "gc/g1/heapRegion.hpp"
+#endif /* !AARCH64 */
+#ifdef AARCH64
+#include "utilities/formatBuffer.hpp"
+#endif /* AARCH64 */
 #include "utilities/macros.hpp"
 
 #ifdef ASSERT
@@ -41,11 +52,6 @@
 void G1PreBarrierStub::emit_code(LIR_Assembler* ce) {
   G1BarrierSetAssembler* bs = (G1BarrierSetAssembler*)BarrierSet::barrier_set()->barrier_set_assembler();
   bs->gen_pre_barrier_stub(ce, this);
-}
-
-void G1PostBarrierStub::emit_code(LIR_Assembler* ce) {
-  G1BarrierSetAssembler* bs = (G1BarrierSetAssembler*)BarrierSet::barrier_set()->barrier_set_assembler();
-  bs->gen_post_barrier_stub(ce, this);
 }
 
 void G1BarrierSetC1::pre_barrier(LIRAccess& access, LIR_Opr addr_opr,
@@ -115,6 +121,136 @@ void G1BarrierSetC1::pre_barrier(LIRAccess& access, LIR_Opr addr_opr,
   __ branch_destination(slow->continuation());
 }
 
+#ifdef AARCH64
+class LIR_OpG1PostBarrier : public LIR_Op {
+ friend class LIR_OpVisitState;
+
+private:
+  LIR_Opr       _addr;
+  LIR_Opr       _new_val;
+  LIR_Opr       _thread;
+  LIR_Opr       _tmp1;
+  LIR_Opr       _tmp2;
+
+public:
+  LIR_OpG1PostBarrier(LIR_Opr addr,
+                      LIR_Opr new_val,
+                      LIR_Opr thread,
+                      LIR_Opr tmp1,
+                      LIR_Opr tmp2)
+    : LIR_Op(lir_none, lir_none, nullptr),
+      _addr(addr),
+      _new_val(new_val),
+      _thread(thread),
+      _tmp1(tmp1),
+      _tmp2(tmp2)
+    {}
+
+  virtual void visit(LIR_OpVisitState* state) {
+    state->do_input(_addr);
+    state->do_input(_new_val);
+    state->do_input(_thread);
+
+    // Use temps to enforce different registers.
+    state->do_temp(_addr);
+    state->do_temp(_new_val);
+    state->do_temp(_thread);
+    state->do_temp(_tmp1);
+    state->do_temp(_tmp2);
+
+    if (_info != nullptr) {
+      state->do_info(_info);
+    }
+  }
+
+  virtual void emit_code(LIR_Assembler* ce) {
+    if (_info != nullptr) {
+      ce->add_debug_info_for_null_check_here(_info);
+    }
+
+    Register addr = _addr->as_pointer_register();
+    Register new_val = _new_val->as_pointer_register();
+    Register thread = _thread->as_pointer_register();
+    Register tmp1 = _tmp1->as_pointer_register();
+    Register tmp2 = _tmp2->as_pointer_register();
+
+    // This may happen for a store of x.a = x - we do not need a post barrier for those
+    // as the cross-region test will always exit early anyway.
+    // The post barrier implementations can assume that addr and new_val are different
+    // then.
+    if (addr == new_val) {
+      ce->masm()->block_comment(err_msg("same addr/new_val due to self-referential store with imprecise card mark %s", addr->name()));
+      return;
+    }
+
+    G1BarrierSetAssembler* bs_asm = static_cast<G1BarrierSetAssembler*>(BarrierSet::barrier_set()->barrier_set_assembler());
+    bs_asm->g1_write_barrier_post_c1(ce->masm(), addr, new_val, thread, tmp1, tmp2);
+  }
+
+  virtual void print_instr(outputStream* out) const {
+    _addr->print(out);     out->print(" ");
+    _new_val->print(out);  out->print(" ");
+    _thread->print(out);   out->print(" ");
+    _tmp1->print(out);     out->print(" ");
+    _tmp2->print(out);     out->print(" ");
+    out->cr();
+  }
+
+#ifndef PRODUCT
+  virtual const char* name() const  {
+    return "lir_g1_post_barrier";
+  }
+#endif // PRODUCT
+};
+
+void G1BarrierSetC1::post_barrier(LIRAccess& access, LIR_Opr addr, LIR_Opr new_val) {
+  LIRGenerator* gen = access.gen();
+  DecoratorSet decorators = access.decorators();
+  bool in_heap = (decorators & IN_HEAP) != 0;
+  if (!in_heap) {
+    return;
+  }
+
+  // If the "new_val" is a constant null, no barrier is necessary.
+  if (new_val->is_constant() &&
+      new_val->as_constant_ptr()->as_jobject() == nullptr) return;
+
+  if (!new_val->is_register()) {
+    LIR_Opr new_val_reg = gen->new_register(T_OBJECT);
+    if (new_val->is_constant()) {
+      __ move(new_val, new_val_reg);
+    } else {
+      __ leal(new_val, new_val_reg);
+    }
+    new_val = new_val_reg;
+  }
+  assert(new_val->is_register(), "must be a register at this point");
+
+  if (addr->is_address()) {
+    LIR_Address* address = addr->as_address_ptr();
+    LIR_Opr ptr = gen->new_pointer_register();
+    if (!address->index()->is_valid() && address->disp() == 0) {
+      __ move(address->base(), ptr);
+    } else {
+      assert(address->disp() != max_jint, "lea doesn't support patched addresses!");
+      __ leal(addr, ptr);
+    }
+    addr = ptr;
+  }
+  assert(addr->is_register(), "must be a register at this point");
+
+  __ append(new LIR_OpG1PostBarrier(addr,
+                                    new_val,
+                                    gen->getThreadPointer() /* thread */,
+                                    gen->new_pointer_register() /* tmp1 */,
+                                    gen->new_pointer_register() /* tmp2 */));
+}
+#else // AARCH64
+void G1PostBarrierStub::emit_code(LIR_Assembler* ce) {
+  G1BarrierSetAssembler* bs = (G1BarrierSetAssembler*)BarrierSet::barrier_set()->barrier_set_assembler();
+  bs->gen_post_barrier_stub(ce, this);
+}
+
 void G1BarrierSetC1::post_barrier(LIRAccess& access, LIR_Opr addr, LIR_Opr new_val) {
   LIRGenerator* gen = access.gen();
   DecoratorSet decorators = access.decorators();
@@ -175,6 +311,7 @@ void G1BarrierSetC1::post_barrier(LIRAccess& access, LIR_Opr addr, LIR_Opr new_v
   __ branch(lir_cond_notEqual, slow);
   __ branch_destination(slow->continuation());
 }
+#endif // AARCH64
 
 void G1BarrierSetC1::load_at_resolved(LIRAccess& access, LIR_Opr result) {
   DecoratorSet decorators = access.decorators();
@@ -208,6 +345,7 @@ class C1G1PreBarrierCodeGenClosure : public StubAssemblerCodeGenClosure {
   }
 };
 
+#ifndef AARCH64
 class C1G1PostBarrierCodeGenClosure : public StubAssemblerCodeGenClosure {
   virtual OopMapSet* generate_code(StubAssembler* sasm) {
     G1BarrierSetAssembler* bs = (G1BarrierSetAssembler*)BarrierSet::barrier_set()->barrier_set_assembler();
@@ -216,11 +354,17 @@ class C1G1PostBarrierCodeGenClosure : public StubAssemblerCodeGenClosure {
   }
 };
 
+#endif /* ! AARCH64 */
 void G1BarrierSetC1::generate_c1_runtime_stubs(BufferBlob* buffer_blob) {
   C1G1PreBarrierCodeGenClosure pre_code_gen_cl;
+#ifdef AARCH64
+  _pre_barrier_c1_runtime_code_blob = Runtime1::generate_blob(buffer_blob, Runtime1::number_of_ids, "g1_pre_barrier_slow",
+                                                              false, &pre_code_gen_cl);
+#else
   C1G1PostBarrierCodeGenClosure post_code_gen_cl;
   _pre_barrier_c1_runtime_code_blob = Runtime1::generate_blob(buffer_blob, -1, "g1_pre_barrier_slow",
                                                               false, &pre_code_gen_cl);
   _post_barrier_c1_runtime_code_blob = Runtime1::generate_blob(buffer_blob, -1, "g1_post_barrier_slow",
                                                                false, &post_code_gen_cl);
+#endif // AARCH64
 }

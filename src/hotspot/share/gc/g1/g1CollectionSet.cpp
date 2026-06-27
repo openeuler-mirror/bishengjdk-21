@@ -257,7 +257,11 @@ public:
                   HR_FORMAT_PARAMS(r),
                   p2i(r->top_at_mark_start()),
                   p2i(r->parsable_bottom()),
+#ifndef AARCH64
                   r->has_surv_rate_group() ? r->age_in_surv_rate_group() : -1);
+#else /* AARCH64 */
+                  r->has_surv_rate_group() ? checked_cast<int>(r->age_in_surv_rate_group()) : -1);
+#endif /* AARCH64 */
     return false;
   }
 };
@@ -278,7 +282,12 @@ double G1CollectionSet::finalize_young_part(double target_pause_time_ms, G1Survi
   guarantee(target_pause_time_ms > 0.0,
             "target_pause_time_ms = %1.6lf should be positive", target_pause_time_ms);
 
+#ifndef AARCH64
   size_t pending_cards = _policy->pending_cards_at_gc_start();
+#else /* AARCH64 */
+  bool in_young_only_phase = _policy->collector_state()->in_young_only_phase();
+  size_t pending_cards = _policy->analytics()->predict_pending_cards(in_young_only_phase);
+#endif /* AARCH64 */
 
   log_trace(gc, ergo, cset)("Start choosing CSet. Pending cards: " SIZE_FORMAT " target pause time: %1.2fms",
                             pending_cards, target_pause_time_ms);
@@ -293,7 +302,12 @@ double G1CollectionSet::finalize_young_part(double target_pause_time_ms, G1Survi
 
   verify_young_cset_indices();
 
+#ifndef AARCH64
   double predicted_base_time_ms = _policy->predict_base_time_ms(pending_cards);
+#else /* AARCH64 */
+  size_t card_rs_length = _policy->analytics()->predict_card_rs_length(in_young_only_phase);
+  double predicted_base_time_ms = _policy->predict_base_time_ms(pending_cards, card_rs_length);
+#endif /* AARCH64 */
   // Base time already includes the whole remembered set related time, so do not add that here
   // again.
   double predicted_eden_time = _policy->predict_young_region_other_time_ms(eden_region_length) +
@@ -320,16 +334,36 @@ static int compare_region_idx(const uint a, const uint b) {
 void G1CollectionSet::finalize_old_part(double time_remaining_ms) {
   double non_young_start_time_sec = os::elapsedTime();
 
+#ifndef AARCH64
   if (collector_state()->in_mixed_phase()) {
+#else /* AARCH64 */
+  if (!candidates()->is_empty()) {
+#endif /* AARCH64 */
     candidates()->verify();
 
     G1CollectionCandidateRegionList initial_old_regions;
     assert(_optional_old_regions.length() == 0, "must be");
 
+#ifndef AARCH64
     _policy->select_candidates_from_marking(&candidates()->marking_regions(),
                                             time_remaining_ms,
                                             &initial_old_regions,
                                             &_optional_old_regions);
+#else /* AARCH64 */
+    if (collector_state()->in_mixed_phase()) {
+      time_remaining_ms = _policy->select_candidates_from_marking(&candidates()->marking_regions(),
+                                                                  time_remaining_ms,
+                                                                  &initial_old_regions,
+                                                                  &_optional_old_regions);
+    } else {
+      log_debug(gc, ergo, cset)("Do not add marking candidates to collection set due to pause type.");
+    }
+
+    _policy->select_candidates_from_retained(&candidates()->retained_regions(),
+                                             time_remaining_ms,
+                                             &initial_old_regions,
+                                             &_optional_old_regions);
+#endif /* AARCH64 */
 
     // Move initially selected old regions to collection set directly.
     move_candidates_to_collection_set(&initial_old_regions);

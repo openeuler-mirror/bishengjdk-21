@@ -123,11 +123,18 @@ class G1RebuildRSAndScrubTask : public WorkerTask {
         bool mark_aborted = yield_if_necessary();
         if (mark_aborted) {
           return true;
+#ifdef AARCH64
+        } else if (!should_rebuild_or_scrub(hr)) {
+          // The region may have been reclaimed during the yield/safepoint above.
+          log_trace(gc, marking)("Rebuild aborted for reclaimed region: %u", hr->hrm_index());
+          return false;
+#else
         } else if (!should_rebuild_or_scrub(hr)) {
           // We need to check should_rebuild_or_scrub() again (for humongous objects)
           // because the region might have been eagerly reclaimed during the yield.
           log_trace(gc, marking)("Rebuild aborted for eagerly reclaimed humongous region: %u", hr->hrm_index());
           return false;
+#endif /* AARCH64 */
         }
 
         // Step to next chunk of the humongous object
@@ -192,6 +199,12 @@ class G1RebuildRSAndScrubTask : public WorkerTask {
         if (mark_aborted) {
           return true;
         }
+#ifdef AARCH64
+        if (!should_rebuild_or_scrub(hr)) {
+          log_trace(gc, marking)("Scan and scrub aborted for reclaimed region: %u", hr->hrm_index());
+          return false;
+        }
+#endif /* AARCH64 */
       }
       return false;
     }
@@ -207,6 +220,12 @@ class G1RebuildRSAndScrubTask : public WorkerTask {
         if (mark_aborted) {
           return true;
         }
+#ifdef AARCH64
+        if (!should_rebuild_or_scrub(hr)) {
+          log_trace(gc, marking)("Scan aborted for reclaimed region: %u", hr->hrm_index());
+          return false;
+        }
+#endif /* AARCH64 */
       }
       return false;
     }
@@ -224,6 +243,12 @@ class G1RebuildRSAndScrubTask : public WorkerTask {
         return true;
       }
 
+#ifdef AARCH64
+      // A pause may have reclaimed this region while the concurrent thread yielded.
+      if (!should_rebuild_or_scrub(hr)) {
+        return false;
+      }
+#endif /* AARCH64 */
       // Scrubbing completed for this region - notify that we are done with it, resetting
       // pb to bottom.
       hr->note_end_of_scrubbing();
@@ -273,7 +298,11 @@ class G1RebuildRSAndScrubTask : public WorkerTask {
     G1RebuildRSAndScrubRegionClosure(G1ConcurrentMark* cm, bool should_rebuild_remset, uint worker_id) :
       _cm(cm),
       _bitmap(_cm->mark_bitmap()),
+#ifndef AARCH64
       _rebuild_closure(G1CollectedHeap::heap(), worker_id),
+#else /* AARCH64 */
+      _rebuild_closure(G1CollectedHeap::heap(), worker_id + cm->worker_id_offset()),
+#endif /* AARCH64 */
       _should_rebuild_remset(should_rebuild_remset),
       _processed_words(0) { }
 

@@ -29,18 +29,26 @@
 #include "runtime/interfaceSupport.inline.hpp"
 #include "utilities/macros.hpp"
 
+static G1BarrierSet* current_g1_barrier_set() {
+#ifndef AARCH64
+  return barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
+#else /* AARCH64 */
+  return G1BarrierSet::g1_barrier_set();
+#endif /* AARCH64 */
+}
+
 void G1BarrierSetRuntime::write_ref_array_pre_oop_entry(oop* dst, size_t length) {
-  G1BarrierSet *bs = barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
+  G1BarrierSet* bs = current_g1_barrier_set();
   bs->write_ref_array_pre(dst, length, false);
 }
 
 void G1BarrierSetRuntime::write_ref_array_pre_narrow_oop_entry(narrowOop* dst, size_t length) {
-  G1BarrierSet *bs = barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
+  G1BarrierSet* bs = current_g1_barrier_set();
   bs->write_ref_array_pre(dst, length, false);
 }
 
 void G1BarrierSetRuntime::write_ref_array_post_entry(HeapWord* dst, size_t length) {
-  G1BarrierSet *bs = barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
+  G1BarrierSet* bs = current_g1_barrier_set();
   bs->G1BarrierSet::write_ref_array(dst, length);
 }
 
@@ -54,6 +62,7 @@ JRT_LEAF(void, G1BarrierSetRuntime::write_ref_field_pre_entry(oopDesc* orig, Jav
   G1BarrierSet::satb_mark_queue_set().enqueue_known_active(queue, orig);
 JRT_END
 
+#ifndef AARCH64
 // G1 post write barrier slowpath
 JRT_LEAF(void, G1BarrierSetRuntime::write_ref_field_post_entry(volatile G1CardTable::CardValue* card_addr,
                                                                JavaThread* thread))
@@ -61,6 +70,8 @@ JRT_LEAF(void, G1BarrierSetRuntime::write_ref_field_post_entry(volatile G1CardTa
   G1DirtyCardQueue& queue = G1ThreadLocalData::dirty_card_queue(thread);
   G1BarrierSet::dirty_card_queue_set().enqueue(queue, card_addr);
 JRT_END
+#endif /* !AARCH64 */
+
 #ifdef AARCH64
 JRT_LEAF(void, G1BarrierSetRuntime::clone(oopDesc* src, oopDesc* dst, size_t size))
   HeapAccess<>::clone(src, dst, size);

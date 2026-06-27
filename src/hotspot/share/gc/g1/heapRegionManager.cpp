@@ -64,7 +64,12 @@ public:
 
 HeapRegionManager::HeapRegionManager() :
   _bot_mapper(nullptr),
+#ifndef AARCH64
   _cardtable_mapper(nullptr),
+#else /* AARCH64 */
+  _card_table_mapper(nullptr),
+  _refinement_table_mapper(nullptr),
+#endif /* AARCH64 */
   _committed_map(),
   _allocated_heapregions_length(0),
   _regions(), _heap_mapper(nullptr),
@@ -73,9 +78,16 @@ HeapRegionManager::HeapRegionManager() :
 { }
 
 void HeapRegionManager::initialize(G1RegionToSpaceMapper* heap_storage,
+#ifndef AARCH64
                                    G1RegionToSpaceMapper* bitmap,
                                    G1RegionToSpaceMapper* bot,
                                    G1RegionToSpaceMapper* cardtable) {
+#else /* AARCH64 */
+                                     G1RegionToSpaceMapper* bitmap,
+                                     G1RegionToSpaceMapper* bot,
+                                     G1RegionToSpaceMapper* card_table,
+                                     G1RegionToSpaceMapper* refinement_table) {
+#endif /* AARCH64 */
   _allocated_heapregions_length = 0;
 
   _heap_mapper = heap_storage;
@@ -83,7 +95,12 @@ void HeapRegionManager::initialize(G1RegionToSpaceMapper* heap_storage,
   _bitmap_mapper = bitmap;
 
   _bot_mapper = bot;
+#ifndef AARCH64
   _cardtable_mapper = cardtable;
+#else /* AARCH64 */
+  _card_table_mapper = card_table;
+  _refinement_table_mapper = refinement_table;
+#endif /* AARCH64 */
 
   _regions.initialize(heap_storage->reserved(), HeapRegion::GrainBytes);
 
@@ -189,7 +206,12 @@ void HeapRegionManager::commit_regions(uint index, size_t num_regions, WorkerThr
   _bitmap_mapper->commit_regions(index, num_regions, pretouch_workers);
 
   _bot_mapper->commit_regions(index, num_regions, pretouch_workers);
+#ifndef AARCH64
   _cardtable_mapper->commit_regions(index, num_regions, pretouch_workers);
+#else /* AARCH64 */
+  _card_table_mapper->commit_regions(index, num_regions, pretouch_workers);
+  _refinement_table_mapper->commit_regions(index, num_regions, pretouch_workers);
+#endif /* AARCH64 */
 }
 
 void HeapRegionManager::uncommit_regions(uint start, uint num_regions) {
@@ -213,7 +235,12 @@ void HeapRegionManager::uncommit_regions(uint start, uint num_regions) {
   _bitmap_mapper->uncommit_regions(start, num_regions);
 
   _bot_mapper->uncommit_regions(start, num_regions);
+#ifndef AARCH64
   _cardtable_mapper->uncommit_regions(start, num_regions);
+#else /* AARCH64 */
+  _card_table_mapper->uncommit_regions(start, num_regions);
+  _refinement_table_mapper->uncommit_regions(start, num_regions);
+#endif /* AARCH64 */
 
   _committed_map.uncommit(start, end);
 }
@@ -265,19 +292,35 @@ void HeapRegionManager::clear_auxiliary_data_structures(uint start, uint num_reg
   // Signal G1BlockOffsetTable to clear the given regions.
   _bot_mapper->signal_mapping_changed(start, num_regions);
   // Signal G1CardTable to clear the given regions.
+#ifndef AARCH64
   _cardtable_mapper->signal_mapping_changed(start, num_regions);
+#else /* AARCH64 */
+  _card_table_mapper->signal_mapping_changed(start, num_regions);
+  // Signal refinement table to clear the given regions.
+  _refinement_table_mapper->signal_mapping_changed(start, num_regions);
+#endif /* AARCH64 */
 }
 
 MemoryUsage HeapRegionManager::get_auxiliary_data_memory_usage() const {
   size_t used_sz =
     _bitmap_mapper->committed_size() +
     _bot_mapper->committed_size() +
+#ifndef AARCH64
     _cardtable_mapper->committed_size();
+#else /* AARCH64 */
+    _card_table_mapper->committed_size() +
+    _refinement_table_mapper->committed_size();
+#endif /* AARCH64 */
 
   size_t committed_sz =
     _bitmap_mapper->reserved_size() +
     _bot_mapper->reserved_size() +
+#ifndef AARCH64
     _cardtable_mapper->reserved_size();
+#else /* AARCH64 */
+    _card_table_mapper->reserved_size() +
+    _refinement_table_mapper->reserved_size();
+#endif /* AARCH64 */
 
   return MemoryUsage(0, used_sz, committed_sz, committed_sz);
 }

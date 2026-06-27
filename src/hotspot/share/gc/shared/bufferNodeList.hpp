@@ -27,6 +27,7 @@
 
 #include "utilities/globalDefinitions.hpp"
 
+#ifndef AARCH64
 class BufferNode;
 
 struct BufferNodeList {
@@ -38,4 +39,5 @@ struct BufferNodeList {
   BufferNodeList(BufferNode* head, BufferNode* tail, size_t entry_count);
 };
 
+#endif // !AARCH64
 #endif // SHARE_GC_SHARED_BUFFERNODELIST_HPP

@@ -29,7 +29,9 @@
 #include "gc/z/zBarrierSetAssembler.hpp"
 #include "gc/z/zBarrierSetRuntime.hpp"
 #include "opto/arraycopynode.hpp"
+#ifndef AARCH64
 #include "opto/addnode.hpp"
+#endif /* ! AARCH64 */
 #include "opto/block.hpp"
 #include "opto/compile.hpp"
 #include "opto/graphKit.hpp"
@@ -39,7 +41,9 @@
 #include "opto/node.hpp"
 #include "opto/output.hpp"
 #include "opto/regalloc.hpp"
+#ifndef AARCH64
 #include "opto/rootnode.hpp"
+#endif /* ! AARCH64 */
 #include "opto/runtime.hpp"
 #include "opto/type.hpp"
 #include "utilities/debug.hpp"
@@ -600,6 +604,7 @@ void ZBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* a
 
 #undef XTOP
 
+#ifndef AARCH64
 // == Dominating barrier elision ==
 
 static bool block_has_safepoint(const Block* block, uint from, uint to) {
@@ -767,7 +772,15 @@ static bool is_allocation(const Node* node) {
 static void elide_mach_barrier(MachNode* mach) {
   mach->set_barrier_data(ZBarrierElided);
 }
+#endif /* ! AARCH64 */
 
+#ifdef AARCH64
+void ZBarrierSetC2::elide_dominated_barrier(MachNode* mach) const {
+  mach->set_barrier_data(ZBarrierElided);
+}
+#endif /* AARCH64 */
+
+#ifndef AARCH64
 void ZBarrierSetC2::analyze_dominating_barriers_impl(Node_List& accesses, Node_List& access_dominators) const {
   Compile* const C = Compile::current();
   PhaseCFG* const cfg = C->cfg();
@@ -863,6 +876,7 @@ void ZBarrierSetC2::analyze_dominating_barriers_impl(Node_List& accesses, Node_L
   }
 }
 
+#endif /* ! AARCH64 */
 void ZBarrierSetC2::analyze_dominating_barriers() const {
   ResourceMark rm;
   Compile* const C = Compile::current();
@@ -932,9 +946,15 @@ void ZBarrierSetC2::analyze_dominating_barriers() const {
   }
 
   // Step 2 - Find dominating accesses or allocations for each access
+#ifndef AARCH64
   analyze_dominating_barriers_impl(loads, load_dominators);
   analyze_dominating_barriers_impl(stores, store_dominators);
   analyze_dominating_barriers_impl(atomics, atomic_dominators);
+#else /* AARCH64 */
+  elide_dominated_barriers(loads, load_dominators);
+  elide_dominated_barriers(stores, store_dominators);
+  elide_dominated_barriers(atomics, atomic_dominators);
+#endif /* AARCH64 */
 }
 
 #ifndef AARCH64

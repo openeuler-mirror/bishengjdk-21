@@ -64,7 +64,7 @@ public class TestEagerReclaimHumongousRegionsClearMarkBits {
         output.shouldHaveExitValue(0);
 
         // Find the log output indicating that the humongous object has been reclaimed, and marked.
-        Pattern pattern = Pattern.compile("Humongous region .* marked 1 reclaim candidate 1 type array 1");
+        Pattern pattern = Pattern.compile("Humongous region .* marked 1 .*reclaim candidate 1 type array 1");
         Asserts.assertTrue(pattern.matcher(log).find(), "Could not find log output matching marked humongous region.");
 
         pattern = Pattern.compile("Reclaimed humongous region .*");

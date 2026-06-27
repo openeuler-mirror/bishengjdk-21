@@ -24,6 +24,9 @@
 
 #include "precompiled.hpp"
 #include "gc/g1/g1CollectedHeap.inline.hpp"
+#ifdef AARCH64
+#include "gc/g1/g1Policy.hpp"
+#endif /* AARCH64 */
 #include "gc/g1/g1CollectionSetCandidates.hpp"
 #include "gc/g1/g1CollectionSetChooser.hpp"
 #include "gc/g1/heapRegionRemSet.inline.hpp"
@@ -95,7 +98,12 @@ class G1BuildCandidateRegionsTask : public WorkerTask {
     void set(uint idx, HeapRegion* hr) {
       assert(idx < _max_size, "Index %u out of bounds %u", idx, _max_size);
       assert(_data[idx]._r == nullptr, "Value must not have been set.");
+#ifndef AARCH64
       _data[idx] = CandidateInfo(hr, hr->calc_gc_efficiency());
+#else /* AARCH64 */
+      G1Policy* policy = G1CollectedHeap::heap()->policy();
+      _data[idx] = CandidateInfo(hr, policy->predict_gc_efficiency(hr));
+#endif /* AARCH64 */
     }
 
     void sort_by_efficiency() {
@@ -148,16 +156,24 @@ class G1BuildCandidateRegionsTask : public WorkerTask {
       _regions_added(0) { }
 
     bool do_heap_region(HeapRegion* r) {
+      bool is_existing_candidate = false;
+#ifdef AARCH64
+      is_existing_candidate = r->is_collection_set_candidate();
+#endif
+
       // We will skip any region that's currently used as an old GC
       // alloc region (we should not consider those for collection
       // before we fill them up).
       if (should_add(r) && !G1CollectedHeap::heap()->is_old_gc_alloc_region(r)) {
+#ifdef AARCH64
+        assert(r->rem_set()->is_complete(), "must be %u", r->hrm_index());
+#endif
         add_region(r);
-      } else if (r->is_old()) {
-        // Keep remembered sets for humongous regions, otherwise clean them out.
+      } else if (r->is_old() && !is_existing_candidate) {
+        // Keep remembered sets for humongous regions and existing candidates.
         r->rem_set()->clear(true /* only_cardset */);
       } else {
-        assert(!r->is_old() || !r->rem_set()->is_tracked(),
+        assert(is_existing_candidate || !r->is_old() || !r->rem_set()->is_tracked(),
                "Missed to clear unused remembered set of region %u (%s) that is %s",
                r->hrm_index(), r->get_type_str(), r->rem_set()->get_state_str());
       }
@@ -254,6 +270,9 @@ uint G1CollectionSetChooser::calculate_work_chunk_size(uint num_workers, uint nu
 bool G1CollectionSetChooser::should_add(HeapRegion* hr) {
   return !hr->is_young() &&
          !hr->is_humongous() &&
+#ifdef AARCH64
+         !hr->is_collection_set_candidate() &&
+#endif
          region_occupancy_low_enough_for_evac(hr->live_bytes()) &&
          hr->rem_set()->is_complete();
 }

@@ -35,11 +35,15 @@
 #include "memory/padded.hpp"
 #include "utilities/nonblockingQueue.hpp"
 
+#ifndef AARCH64
 class G1PrimaryConcurrentRefineThread;
 class G1DirtyCardQueueSet;
 class G1RedirtyCardsQueueSet;
 class Thread;
 
+#endif // !AARCH64
+
+#ifndef AARCH64
 // A ptrQueue whose elements are "oops", pointers to object heads.
 class G1DirtyCardQueue: public PtrQueue {
   G1ConcurrentRefineStats* _refinement_stats;
@@ -68,6 +72,9 @@ public:
 
 };
 
+#endif // !AARCH64
+
+#ifndef AARCH64
 class G1DirtyCardQueueSet: public PtrQueueSet {
   // Head and tail of a list of BufferNodes, linked through their next()
   // fields.  Similar to BufferNodeList, but without the _entry_count.
@@ -299,4 +306,5 @@ public:
   void set_mutator_refinement_threshold(size_t value);
 };
 
+#endif // !AARCH64
 #endif // SHARE_GC_G1_G1DIRTYCARDQUEUE_HPP

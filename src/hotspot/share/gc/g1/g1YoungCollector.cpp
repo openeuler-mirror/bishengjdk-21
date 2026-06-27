@@ -30,6 +30,9 @@
 #include "gc/g1/g1Allocator.hpp"
 #include "gc/g1/g1CardSetMemory.hpp"
 #include "gc/g1/g1CollectedHeap.inline.hpp"
+#ifdef AARCH64
+#include "gc/g1/g1CollectionSetCandidates.inline.hpp"
+#endif /* AARCH64 */
 #include "gc/g1/g1CollectorState.hpp"
 #include "gc/g1/g1ConcurrentMark.hpp"
 #include "gc/g1/g1GCPhaseTimes.hpp"
@@ -39,7 +42,9 @@
 #include "gc/g1/g1MonitoringSupport.hpp"
 #include "gc/g1/g1ParScanThreadState.inline.hpp"
 #include "gc/g1/g1Policy.hpp"
+#ifndef AARCH64
 #include "gc/g1/g1RedirtyCardsQueue.hpp"
+#endif /* ! AARCH64 */
 #include "gc/g1/g1RemSet.hpp"
 #include "gc/g1/g1RootProcessor.hpp"
 #include "gc/g1/g1Trace.hpp"
@@ -771,14 +776,27 @@ void G1YoungCollector::evacuate_next_optional_regions(G1ParScanThreadStateSet* p
 }
 
 void G1YoungCollector::evacuate_optional_collection_set(G1ParScanThreadStateSet* per_thread_states) {
+#ifndef AARCH64
   const double collection_start_time_ms = phase_times()->cur_collection_start_sec() * 1000.0;
+#else /* AARCH64 */
+  const double collection_start_time_ms = policy()->cur_pause_start_sec() * 1000.0;
+  const double target_pause_time_ms = G1ForceOptionalEvacuation ? DBL_MAX : MaxGCPauseMillis;
+#endif /* AARCH64 */
 
   while (!evacuation_failed() && collection_set()->optional_region_length() > 0) {
 
     double time_used_ms = os::elapsedTime() * 1000.0 - collection_start_time_ms;
+#ifndef AARCH64
     double time_left_ms = MaxGCPauseMillis - time_used_ms;
+#else /* AARCH64 */
+    double time_left_ms = target_pause_time_ms - time_used_ms;
+#endif /* AARCH64 */
 
+#ifndef AARCH64
     if (time_left_ms < 0 ||
+#else /* AARCH64 */
+    if (time_left_ms <= 0 ||
+#endif /* AARCH64 */
         !collection_set()->finalize_optional_for_evacuation(time_left_ms * policy()->optional_evacuation_fraction())) {
       log_trace(gc, ergo, cset)("Skipping evacuation of %u optional regions, no more regions can be evacuated in %.3fms",
                                 collection_set()->optional_region_length(), time_left_ms);
@@ -874,13 +892,10 @@ class G1STWRefProcProxyTask : public RefProcProxyTask {
   TaskTerminator _terminator;
   G1ScannerTasksQueueSet& _task_queues;
 
-  // Special closure for enqueuing discovered fields: during enqueue the card table
-  // may not be in shape to properly handle normal barrier calls (e.g. card marks
-  // in regions that failed evacuation, scribbling of various values by card table
-  // scan code). Additionally the regular barrier enqueues into the "global"
-  // DCQS, but during GC we need these to-be-refined entries in the GC local queue
-  // so that after clearing the card table, the redirty cards phase will properly
-  // mark all dirty cards to be picked up by refinement.
+  // G1-specific closure for recording discovered fields while the normal card
+  // table barrier cannot be used during GC.  The legacy path enqueues into a
+  // GC-local queue for later redirtying; AArch64 marks the refinement table while
+  // the card table is used by GC.
   class G1EnqueueDiscoveredFieldClosure : public EnqueueDiscoveredFieldClosure {
     G1CollectedHeap* _g1h;
     G1ParScanThreadState* _pss;
@@ -968,6 +983,17 @@ void G1YoungCollector::post_evacuate_cleanup_2(G1ParScanThreadStateSet* per_thre
   phase_times()->record_post_evacuate_cleanup_task_2_time((Ticks::now() - start).seconds() * 1000.0);
 }
 
+#ifdef AARCH64
+void G1YoungCollector::enqueue_candidates_as_root_regions() {
+  assert(collector_state()->in_concurrent_start_gc(), "must be");
+
+  G1CollectionSetCandidates* candidates = collection_set()->candidates();
+  for (HeapRegion* r : *candidates) {
+    _g1h->concurrent_mark()->add_root_region(r);
+  }
+}
+#endif /* AARCH64 */
+
 void G1YoungCollector::post_evacuate_collection_set(G1EvacInfo* evacuation_info,
                                                     G1ParScanThreadStateSet* per_thread_states) {
   G1GCPhaseTimes* p = phase_times();
@@ -989,6 +1015,15 @@ void G1YoungCollector::post_evacuate_collection_set(G1EvacInfo* evacuation_info,
   post_evacuate_cleanup_1(per_thread_states);
 
   post_evacuate_cleanup_2(per_thread_states, evacuation_info);
+
+#ifdef AARCH64
+  // Regions in the collection set candidates are roots for the marking (they are
+  // not marked through considering they are very likely to be reclaimed soon.
+  // They need to be enqueued explicitly compared to survivor regions.
+  if (collector_state()->in_concurrent_start_gc()) {
+    enqueue_candidates_as_root_regions();
+  }
+#endif /* AARCH64 */
 
   _evac_failure_regions.post_collection();
 

@@ -53,6 +53,7 @@
 #include "utilities/quickSort.hpp"
 #include "utilities/ticks.hpp"
 
+#ifndef AARCH64
 G1DirtyCardQueue::G1DirtyCardQueue(G1DirtyCardQueueSet* qset) :
   PtrQueue(qset),
   _refinement_stats(new G1ConcurrentRefineStats())
@@ -195,6 +196,9 @@ bool G1DirtyCardQueueSet::PausedBuffers::PausedList::is_next() const {
   return _safepoint_id == SafepointSynchronize::safepoint_id();
 }
 
+#endif // !AARCH64
+
+#ifndef AARCH64
 void G1DirtyCardQueueSet::PausedBuffers::PausedList::add(BufferNode* node) {
   assert_not_at_safepoint();
   assert(is_next(), "precondition");
@@ -339,6 +343,9 @@ BufferNodeList G1DirtyCardQueueSet::take_all_completed_buffers() {
   return BufferNodeList(pair.first, pair.second, num_cards);
 }
 
+#endif // !AARCH64
+
+#ifndef AARCH64
 class G1RefineBufferedCards : public StackObj {
   BufferNode* const _node;
   CardTable::CardValue** const _node_buffer;
@@ -481,6 +488,9 @@ void G1DirtyCardQueueSet::handle_refined_buffer(BufferNode* node,
   }
 }
 
+#endif // !AARCH64
+
+#ifndef AARCH64
 void G1DirtyCardQueueSet::handle_completed_buffer(BufferNode* new_node,
                                                   G1ConcurrentRefineStats* stats) {
   enqueue_completed_buffer(new_node);
@@ -604,3 +614,5 @@ size_t G1DirtyCardQueueSet::mutator_refinement_threshold() const {
 void G1DirtyCardQueueSet::set_mutator_refinement_threshold(size_t value) {
   Atomic::store(&_mutator_refinement_threshold, value);
 }
+
+#endif // !AARCH64
