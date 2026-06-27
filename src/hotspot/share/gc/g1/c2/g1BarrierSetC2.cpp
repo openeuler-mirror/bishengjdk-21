@@ -24,49 +24,46 @@
 
 #include "precompiled.hpp"
 #include "classfile/javaClasses.hpp"
+#ifdef AARCH64
+#include "code/vmreg.inline.hpp"
+#endif
 #include "gc/g1/c2/g1BarrierSetC2.hpp"
 #include "gc/g1/g1BarrierSet.hpp"
+#ifdef AARCH64
+#include "gc/g1/g1BarrierSetAssembler.hpp"
+#endif
 #include "gc/g1/g1BarrierSetRuntime.hpp"
 #include "gc/g1/g1CardTable.hpp"
 #include "gc/g1/g1ThreadLocalData.hpp"
 #include "gc/g1/heapRegion.hpp"
 #include "opto/arraycopynode.hpp"
+#ifdef AARCH64
+#include "opto/block.hpp"
+#endif
 #include "opto/compile.hpp"
 #include "opto/escape.hpp"
 #include "opto/graphKit.hpp"
 #include "opto/idealKit.hpp"
+#ifdef AARCH64
+#include "opto/machnode.hpp"
+#endif
 #include "opto/macro.hpp"
+#ifdef AARCH64
+#include "opto/memnode.hpp"
+#include "opto/node.hpp"
+#include "opto/output.hpp"
+#include "opto/regalloc.hpp"
+#endif
 #include "opto/rootnode.hpp"
+#ifdef AARCH64
+#include "opto/runtime.hpp"
+#endif
 #include "opto/type.hpp"
+#ifdef AARCH64
+#include "utilities/growableArray.hpp"
+#endif
 #include "utilities/macros.hpp"
 
-const TypeFunc *G1BarrierSetC2::write_ref_field_pre_entry_Type() {
-  const Type **fields = TypeTuple::fields(2);
-  fields[TypeFunc::Parms+0] = TypeInstPtr::NOTNULL; // original field value
-  fields[TypeFunc::Parms+1] = TypeRawPtr::NOTNULL; // thread
-  const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+2, fields);
-
-  // create result type (range)
-  fields = TypeTuple::fields(0);
-  const TypeTuple *range = TypeTuple::make(TypeFunc::Parms+0, fields);
-
-  return TypeFunc::make(domain, range);
-}
-
-const TypeFunc *G1BarrierSetC2::write_ref_field_post_entry_Type() {
-  const Type **fields = TypeTuple::fields(2);
-  fields[TypeFunc::Parms+0] = TypeRawPtr::NOTNULL;  // Card addr
-  fields[TypeFunc::Parms+1] = TypeRawPtr::NOTNULL;  // thread
-  const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+2, fields);
-
-  // create result type (range)
-  fields = TypeTuple::fields(0);
-  const TypeTuple *range = TypeTuple::make(TypeFunc::Parms, fields);
-
-  return TypeFunc::make(domain, range);
-}
-
-#define __ ideal.
 /*
  * Determine if the G1 pre-barrier can be removed. The pre-barrier is
  * required by SATB to make sure all objects live at the start of the
@@ -175,7 +172,520 @@ bool G1BarrierSetC2::g1_can_remove_pre_barrier(GraphKit* kit,
   return false;
 }
 
-// G1 pre/post barriers
+/*
+ * G1, similar to any GC with a Young Generation, requires a way to keep track
+ * of references from Old Generation to Young Generation to make sure all live
+ * objects are found. G1 also requires to keep track of object references
+ * between different regions to enable evacuation of old regions, which is done
+ * as part of mixed collections. References are tracked in remembered sets,
+ * which are continuously updated as references are written to with the help of
+ * the post-barrier.
+ *
+ * To reduce the number of updates to the remembered set, the post-barrier
+ * filters out updates to fields in objects located in the Young Generation, the
+ * same region as the reference, when null is being written, or if the card is
+ * already marked as dirty by an earlier write.
+ *
+ * Under certain circumstances it is possible to avoid generating the
+ * post-barrier completely, if it is possible during compile time to prove the
+ * object is newly allocated and that no safepoint exists between the allocation
+ * and the store. This can be seen as a compile-time version of the
+ * above-mentioned Young Generation filter.
+ *
+ * In the case of a slow allocation, the allocation code must handle the barrier
+ * as part of the allocation if the allocated object is not located in the
+ * nursery; this would happen for humongous objects.
+ */
+bool G1BarrierSetC2::g1_can_remove_post_barrier(GraphKit* kit,
+                                                PhaseValues* phase, Node* store,
+                                                Node* adr) const {
+  intptr_t      offset = 0;
+  Node*         base   = AddPNode::Ideal_base_and_offset(adr, phase, offset);
+  AllocateNode* alloc  = AllocateNode::Ideal_allocation(base, phase);
+
+  if (offset == Type::OffsetBot) {
+    return false; // Cannot unalias unless there are precise offsets.
+  }
+  if (alloc == nullptr) {
+    return false; // No allocation found.
+  }
+
+#ifdef AARCH64
+  Node* mem = store; // The late-barrier path passes the store control.
+#else
+  Node* mem = store->in(MemNode::Control); // The old path passes the Store node.
+#endif
+  if (mem->is_Proj() && mem->in(0)->is_Initialize()) {
+    InitializeNode* st_init = mem->in(0)->as_Initialize();
+    AllocateNode*  st_alloc = st_init->allocation();
+    // Make sure we are looking at the same allocation
+    if (alloc == st_alloc) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+Node* G1BarrierSetC2::load_at_resolved(C2Access& access, const Type* val_type) const {
+#ifdef AARCH64
+  DecoratorSet decorators = access.decorators();
+  bool on_weak = (decorators & ON_WEAK_OOP_REF) != 0;
+  bool on_phantom = (decorators & ON_PHANTOM_OOP_REF) != 0;
+  bool no_keepalive = (decorators & AS_NO_KEEPALIVE) != 0;
+  // If we are reading the value of the referent field of a Reference object, we
+  // need to record the referent in an SATB log buffer using the pre-barrier
+  // mechanism. Also we need to add a memory barrier to prevent commoning reads
+  // from this field across safepoints, since GC can change its value.
+  bool need_read_barrier = ((on_weak || on_phantom) && !no_keepalive);
+  if (access.is_oop() && need_read_barrier) {
+    access.set_barrier_data(G1C2BarrierPre);
+  }
+  return CardTableBarrierSetC2::load_at_resolved(access, val_type);
+#else
+  DecoratorSet decorators = access.decorators();
+  Node* adr = access.addr().node();
+  Node* obj = access.base();
+
+  bool anonymous = (decorators & C2_UNSAFE_ACCESS) != 0;
+  bool mismatched = (decorators & C2_MISMATCHED) != 0;
+  bool unknown = (decorators & ON_UNKNOWN_OOP_REF) != 0;
+  bool in_heap = (decorators & IN_HEAP) != 0;
+  bool in_native = (decorators & IN_NATIVE) != 0;
+  bool on_weak = (decorators & ON_WEAK_OOP_REF) != 0;
+  bool on_phantom = (decorators & ON_PHANTOM_OOP_REF) != 0;
+  bool is_unordered = (decorators & MO_UNORDERED) != 0;
+  bool no_keepalive = (decorators & AS_NO_KEEPALIVE) != 0;
+  bool is_mixed = !in_heap && !in_native;
+  bool need_cpu_mem_bar = !is_unordered || mismatched || is_mixed;
+
+  Node* top = Compile::current()->top();
+  Node* offset = adr->is_AddP() ? adr->in(AddPNode::Offset) : top;
+
+  // If we are reading the value of the referent field of a Reference
+  // object (either by using Unsafe directly or through reflection)
+  // then, if G1 is enabled, we need to record the referent in an
+  // SATB log buffer using the pre-barrier mechanism.
+  // Also we need to add memory barrier to prevent commoning reads
+  // from this field across safepoint since GC can change its value.
+  bool need_read_barrier = (((on_weak || on_phantom) && !no_keepalive) ||
+                            (in_heap && unknown && offset != top && obj != top));
+
+  if (!access.is_oop() || !need_read_barrier) {
+    return CardTableBarrierSetC2::load_at_resolved(access, val_type);
+  }
+
+  assert(access.is_parse_access(), "entry not supported at optimization time");
+
+  C2ParseAccess& parse_access = static_cast<C2ParseAccess&>(access);
+  GraphKit* kit = parse_access.kit();
+  Node* load;
+
+  Node* control =  kit->control();
+  const TypePtr* adr_type = access.addr().type();
+  MemNode::MemOrd mo = access.mem_node_mo();
+  bool requires_atomic_access = (decorators & MO_UNORDERED) == 0;
+  bool unaligned = (decorators & C2_UNALIGNED) != 0;
+  bool unsafe = (decorators & C2_UNSAFE_ACCESS) != 0;
+  // Pinned control dependency is the strictest. So it's ok to substitute it for any other.
+  load = kit->make_load(control, adr, val_type, access.type(), adr_type, mo,
+      LoadNode::Pinned, requires_atomic_access, unaligned, mismatched, unsafe,
+      access.barrier_data());
+
+
+  if (on_weak || on_phantom) {
+    // Use the pre-barrier to record the value in the referent field
+    pre_barrier(kit, false /* do_load */,
+                kit->control(),
+                nullptr /* obj */, nullptr /* adr */, max_juint /* alias_idx */, nullptr /* val */, nullptr /* val_type */,
+                load /* pre_val */, T_OBJECT);
+    // Add memory barrier to prevent commoning reads from this field
+    // across safepoint since GC can change its value.
+    kit->insert_mem_bar(Op_MemBarCPUOrder);
+  } else if (unknown) {
+    // We do not require a mem bar inside pre_barrier if need_mem_bar
+    // is set: the barriers would be emitted by us.
+    insert_pre_barrier(kit, obj, offset, load, !need_cpu_mem_bar);
+  }
+
+  return load;
+#endif // AARCH64
+}
+
+#ifdef AARCH64
+void G1BarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
+  eliminate_gc_barrier_data(node);
+}
+
+void G1BarrierSetC2::eliminate_gc_barrier_data(Node* node) const {
+  if (node->is_LoadStore()) {
+    LoadStoreNode* loadstore = node->as_LoadStore();
+    loadstore->set_barrier_data(0);
+  } else if (node->is_Mem()) {
+    MemNode* mem = node->as_Mem();
+    mem->set_barrier_data(0);
+  }
+}
+
+static void refine_barrier_by_new_val_type(const Node* n) {
+  if (n->Opcode() != Op_StoreP &&
+      n->Opcode() != Op_StoreN) {
+    return;
+  }
+  MemNode* store = n->as_Mem();
+  const Node* newval = n->in(MemNode::ValueIn);
+  assert(newval != nullptr, "");
+  const Type* newval_bottom = newval->bottom_type();
+  TypePtr::PTR newval_type = newval_bottom->make_ptr()->ptr();
+  uint8_t barrier_data = store->barrier_data();
+  if (!newval_bottom->isa_oopptr() &&
+      !newval_bottom->isa_narrowoop() &&
+      newval_type != TypePtr::Null) {
+    // newval is neither an OOP nor null, so there is no barrier to refine.
+    assert(barrier_data == 0, "non-OOP stores should have no barrier data");
+    return;
+  }
+  if (barrier_data == 0) {
+    // No barrier to refine.
+    return;
+  }
+  if (newval_type == TypePtr::Null) {
+    // Simply elide post-barrier if writing null.
+    barrier_data &= ~G1C2BarrierPost;
+    barrier_data &= ~G1C2BarrierPostNotNull;
+  } else if (((barrier_data & G1C2BarrierPost) != 0) &&
+             newval_type == TypePtr::NotNull) {
+    // If the post-barrier has not been elided yet (e.g. due to newval being
+    // freshly allocated), mark it as not-null (simplifies barrier tests and
+    // compressed OOPs logic).
+    barrier_data |= G1C2BarrierPostNotNull;
+  }
+  store->set_barrier_data(barrier_data);
+  return;
+}
+
+// Refine (not really expand) G1 barriers by looking at the new value type
+// (whether it is necessarily null or necessarily non-null).
+bool G1BarrierSetC2::expand_barriers(Compile* C, PhaseIterGVN& igvn) const {
+  ResourceMark rm;
+  VectorSet visited;
+  Node_List worklist;
+  worklist.push(C->root());
+  while (worklist.size() > 0) {
+    Node* n = worklist.pop();
+    if (visited.test_set(n->_idx)) {
+      continue;
+    }
+    refine_barrier_by_new_val_type(n);
+    for (uint j = 0; j < n->req(); j++) {
+      Node* in = n->in(j);
+      if (in != nullptr) {
+        worklist.push(in);
+      }
+    }
+  }
+  return false;
+}
+
+uint G1BarrierSetC2::estimated_barrier_size(const Node* node) const {
+  uint8_t barrier_data = MemNode::barrier_data(node);
+  uint nodes = 0;
+  if ((barrier_data & G1C2BarrierPre) != 0) {
+    // Only consider the fast path for the barrier that is
+    // actually inlined into the main code stream.
+    // The slow path is laid out separately and does not
+    // directly affect performance.
+    // It has a cost of 6 (AddP, LoadB, Cmp, Bool, If, IfProj).
+    nodes += 6;
+  }
+  if ((barrier_data & G1C2BarrierPost) != 0) {
+    nodes += 60;
+  }
+  return nodes;
+}
+
+bool G1BarrierSetC2::can_initialize_object(const StoreNode* store) const {
+  assert(store->Opcode() == Op_StoreP || store->Opcode() == Op_StoreN, "OOP store expected");
+  // It is OK to move the store across the object initialization boundary only
+  // if it does not have any barrier, or if it has barriers that can be safely
+  // elided (because of the compensation steps taken on the allocation slow path
+  // when ReduceInitialCardMarks is enabled).
+  return (MemNode::barrier_data(store) == 0) || use_ReduceInitialCardMarks();
+}
+
+void G1BarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* ac) const {
+  if (ac->is_clone_inst() && !use_ReduceInitialCardMarks()) {
+    clone_in_runtime(phase, ac, G1BarrierSetRuntime::clone_addr(), "G1BarrierSetRuntime::clone");
+    return;
+  }
+  BarrierSetC2::clone_at_expansion(phase, ac);
+}
+
+Node* G1BarrierSetC2::store_at_resolved(C2Access& access, C2AccessValue& val) const {
+  DecoratorSet decorators = access.decorators();
+  bool anonymous = (decorators & ON_UNKNOWN_OOP_REF) != 0;
+  bool in_heap = (decorators & IN_HEAP) != 0;
+  bool tightly_coupled_alloc = (decorators & C2_TIGHTLY_COUPLED_ALLOC) != 0;
+  bool need_store_barrier = !(tightly_coupled_alloc && use_ReduceInitialCardMarks()) && (in_heap || anonymous);
+  if (access.is_oop() && need_store_barrier) {
+    access.set_barrier_data(get_store_barrier(access));
+    if (tightly_coupled_alloc) {
+      assert(!use_ReduceInitialCardMarks(),
+             "post-barriers are only needed for tightly-coupled initialization stores when ReduceInitialCardMarks is disabled");
+      // Pre-barriers are unnecessary for tightly-coupled initialization stores.
+      access.set_barrier_data(access.barrier_data() & ~G1C2BarrierPre);
+    }
+  }
+  return BarrierSetC2::store_at_resolved(access, val);
+}
+
+Node* G1BarrierSetC2::atomic_cmpxchg_val_at_resolved(C2AtomicParseAccess& access, Node* expected_val,
+                                                     Node* new_val, const Type* value_type) const {
+  GraphKit* kit = access.kit();
+  if (!access.is_oop()) {
+    return BarrierSetC2::atomic_cmpxchg_val_at_resolved(access, expected_val, new_val, value_type);
+  }
+  access.set_barrier_data(G1C2BarrierPre | G1C2BarrierPost);
+  return BarrierSetC2::atomic_cmpxchg_val_at_resolved(access, expected_val, new_val, value_type);
+}
+
+Node* G1BarrierSetC2::atomic_cmpxchg_bool_at_resolved(C2AtomicParseAccess& access, Node* expected_val,
+                                                      Node* new_val, const Type* value_type) const {
+  GraphKit* kit = access.kit();
+  if (!access.is_oop()) {
+    return BarrierSetC2::atomic_cmpxchg_bool_at_resolved(access, expected_val, new_val, value_type);
+  }
+  access.set_barrier_data(G1C2BarrierPre | G1C2BarrierPost);
+  return BarrierSetC2::atomic_cmpxchg_bool_at_resolved(access, expected_val, new_val, value_type);
+}
+
+Node* G1BarrierSetC2::atomic_xchg_at_resolved(C2AtomicParseAccess& access, Node* new_val, const Type* value_type) const {
+  GraphKit* kit = access.kit();
+  if (!access.is_oop()) {
+    return BarrierSetC2::atomic_xchg_at_resolved(access, new_val, value_type);
+  }
+  access.set_barrier_data(G1C2BarrierPre | G1C2BarrierPost);
+  return BarrierSetC2::atomic_xchg_at_resolved(access, new_val, value_type);
+}
+
+class G1BarrierSetC2State : public BarrierSetC2State {
+private:
+  GrowableArray<G1BarrierStubC2*>* _stubs;
+
+public:
+  G1BarrierSetC2State(Arena* arena)
+    : BarrierSetC2State(arena),
+      _stubs(new (arena) GrowableArray<G1BarrierStubC2*>(arena, 8,  0, nullptr)) {}
+
+  GrowableArray<G1BarrierStubC2*>* stubs() {
+    return _stubs;
+  }
+
+  bool needs_liveness_data(const MachNode* mach) const {
+    return G1PreBarrierStubC2::needs_barrier(mach) ||
+           G1PostBarrierStubC2::needs_barrier(mach);
+  }
+
+  bool needs_livein_data() const {
+    return false;
+  }
+};
+
+static G1BarrierSetC2State* barrier_set_state() {
+  return reinterpret_cast<G1BarrierSetC2State*>(Compile::current()->barrier_set_state());
+}
+
+G1BarrierStubC2::G1BarrierStubC2(const MachNode* node) : BarrierStubC2(node) {}
+
+G1PreBarrierStubC2::G1PreBarrierStubC2(const MachNode* node) : G1BarrierStubC2(node) {}
+
+bool G1PreBarrierStubC2::needs_barrier(const MachNode* node) {
+  return (node->barrier_data() & G1C2BarrierPre) != 0;
+}
+
+G1PreBarrierStubC2* G1PreBarrierStubC2::create(const MachNode* node) {
+  G1PreBarrierStubC2* const stub = new (Compile::current()->comp_arena()) G1PreBarrierStubC2(node);
+  if (!Compile::current()->output()->in_scratch_emit_size()) {
+    barrier_set_state()->stubs()->append(stub);
+  }
+  return stub;
+}
+
+void G1PreBarrierStubC2::initialize_registers(Register obj, Register pre_val, Register thread, Register tmp1, Register tmp2) {
+  _obj = obj;
+  _pre_val = pre_val;
+  _thread = thread;
+  _tmp1 = tmp1;
+  _tmp2 = tmp2;
+}
+
+Register G1PreBarrierStubC2::obj() const {
+  return _obj;
+}
+
+Register G1PreBarrierStubC2::pre_val() const {
+  return _pre_val;
+}
+
+Register G1PreBarrierStubC2::thread() const {
+  return _thread;
+}
+
+Register G1PreBarrierStubC2::tmp1() const {
+  return _tmp1;
+}
+
+Register G1PreBarrierStubC2::tmp2() const {
+  return _tmp2;
+}
+
+void G1PreBarrierStubC2::emit_code(MacroAssembler& masm) {
+  G1BarrierSetAssembler* bs = static_cast<G1BarrierSetAssembler*>(BarrierSet::barrier_set()->barrier_set_assembler());
+  bs->generate_c2_pre_barrier_stub(&masm, this);
+}
+
+G1PostBarrierStubC2::G1PostBarrierStubC2(const MachNode* node) : G1BarrierStubC2(node) {}
+
+bool G1PostBarrierStubC2::needs_barrier(const MachNode* node) {
+  return (node->barrier_data() & G1C2BarrierPost) != 0;
+}
+
+G1PostBarrierStubC2* G1PostBarrierStubC2::create(const MachNode* node) {
+  G1PostBarrierStubC2* const stub = new (Compile::current()->comp_arena()) G1PostBarrierStubC2(node);
+  if (!Compile::current()->output()->in_scratch_emit_size()) {
+    barrier_set_state()->stubs()->append(stub);
+  }
+  return stub;
+}
+
+void G1PostBarrierStubC2::initialize_registers(Register thread, Register tmp1, Register tmp2, Register tmp3) {
+  _thread = thread;
+  _tmp1 = tmp1;
+  _tmp2 = tmp2;
+  _tmp3 = tmp3;
+}
+
+Register G1PostBarrierStubC2::thread() const {
+  return _thread;
+}
+
+Register G1PostBarrierStubC2::tmp1() const {
+  return _tmp1;
+}
+
+Register G1PostBarrierStubC2::tmp2() const {
+  return _tmp2;
+}
+
+Register G1PostBarrierStubC2::tmp3() const {
+  return _tmp3;
+}
+
+void G1PostBarrierStubC2::emit_code(MacroAssembler& masm) {
+  G1BarrierSetAssembler* bs = static_cast<G1BarrierSetAssembler*>(BarrierSet::barrier_set()->barrier_set_assembler());
+  bs->generate_c2_post_barrier_stub(&masm, this);
+}
+
+void* G1BarrierSetC2::create_barrier_state(Arena* comp_arena) const {
+  return new (comp_arena) G1BarrierSetC2State(comp_arena);
+}
+
+int G1BarrierSetC2::get_store_barrier(C2Access& access) const {
+  if (!access.is_parse_access()) {
+    // Only support for eliding barriers at parse time for now.
+    return G1C2BarrierPre | G1C2BarrierPost;
+  }
+  GraphKit* kit = (static_cast<C2ParseAccess&>(access)).kit();
+  Node* ctl = kit->control();
+  Node* adr = access.addr().node();
+  uint adr_idx = kit->C->get_alias_index(access.addr().type());
+  assert(adr_idx != Compile::AliasIdxTop, "use other store_to_memory factory");
+
+  bool can_remove_pre_barrier = g1_can_remove_pre_barrier(kit, &kit->gvn(), adr, access.type(), adr_idx);
+
+  // We can skip marks on a freshly-allocated object in Eden. Keep this code in
+  // sync with CardTableBarrierSet::on_slowpath_allocation_exit. That routine
+  // informs GC to take appropriate compensating steps, upon a slow-path
+  // allocation, so as to make this card-mark elision safe.
+  // The post-barrier can also be removed if null is written. This case is
+  // handled by G1BarrierSetC2::expand_barriers, which runs at the end of C2's
+  // platform-independent optimizations to exploit stronger type information.
+  bool can_remove_post_barrier = use_ReduceInitialCardMarks() &&
+    ((access.base() == kit->just_allocated_object(ctl)) ||
+     g1_can_remove_post_barrier(kit, &kit->gvn(), ctl, adr));
+
+  int barriers = 0;
+  if (!can_remove_pre_barrier) {
+    barriers |= G1C2BarrierPre;
+  }
+  if (!can_remove_post_barrier) {
+    barriers |= G1C2BarrierPost;
+  }
+
+  return barriers;
+}
+
+void G1BarrierSetC2::late_barrier_analysis() const {
+  compute_liveness_at_stubs();
+}
+
+void G1BarrierSetC2::emit_stubs(CodeBuffer& cb) const {
+  MacroAssembler masm(&cb);
+  GrowableArray<G1BarrierStubC2*>* const stubs = barrier_set_state()->stubs();
+  for (int i = 0; i < stubs->length(); i++) {
+    // Make sure there is enough space in the code buffer
+    if (cb.insts()->maybe_expand_to_ensure_remaining(PhaseOutput::MAX_inst_size) && cb.blob() == nullptr) {
+      ciEnv::current()->record_failure("CodeCache is full");
+      return;
+    }
+    stubs->at(i)->emit_code(masm);
+  }
+  masm.flush();
+}
+
+#ifndef PRODUCT
+void G1BarrierSetC2::dump_barrier_data(const MachNode* mach, outputStream* st) const {
+  if ((mach->barrier_data() & G1C2BarrierPre) != 0) {
+    st->print("pre ");
+  }
+  if ((mach->barrier_data() & G1C2BarrierPost) != 0) {
+    st->print("post ");
+  }
+  if ((mach->barrier_data() & G1C2BarrierPostNotNull) != 0) {
+    st->print("notnull ");
+  }
+}
+#endif // !PRODUCT
+#endif // AARCH64
+
+#ifndef AARCH64
+const TypeFunc *G1BarrierSetC2::write_ref_field_pre_entry_Type() {
+  const Type **fields = TypeTuple::fields(2);
+  fields[TypeFunc::Parms+0] = TypeInstPtr::NOTNULL; // original field value
+  fields[TypeFunc::Parms+1] = TypeRawPtr::NOTNULL; // thread
+  const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+2, fields);
+
+  // create result type (range)
+  fields = TypeTuple::fields(0);
+  const TypeTuple *range = TypeTuple::make(TypeFunc::Parms+0, fields);
+
+  return TypeFunc::make(domain, range);
+}
+
+const TypeFunc *G1BarrierSetC2::write_ref_field_post_entry_Type() {
+  const Type **fields = TypeTuple::fields(2);
+  fields[TypeFunc::Parms+0] = TypeRawPtr::NOTNULL;  // Card addr
+  fields[TypeFunc::Parms+1] = TypeRawPtr::NOTNULL;  // thread
+  const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+2, fields);
+
+  // create result type (range)
+  fields = TypeTuple::fields(0);
+  const TypeTuple *range = TypeTuple::make(TypeFunc::Parms, fields);
+
+  return TypeFunc::make(domain, range);
+}
+
+#define __ ideal.
 void G1BarrierSetC2::pre_barrier(GraphKit* kit,
                                  bool do_load,
                                  Node* ctl,
@@ -276,63 +786,6 @@ void G1BarrierSetC2::pre_barrier(GraphKit* kit,
   // Final sync IdealKit and GraphKit.
   kit->final_sync(ideal);
 }
-
-/*
- * G1 similar to any GC with a Young Generation requires a way to keep track of
- * references from Old Generation to Young Generation to make sure all live
- * objects are found. G1 also requires to keep track of object references
- * between different regions to enable evacuation of old regions, which is done
- * as part of mixed collections. References are tracked in remembered sets and
- * is continuously updated as reference are written to with the help of the
- * post-barrier.
- *
- * To reduce the number of updates to the remembered set the post-barrier
- * filters updates to fields in objects located in the Young Generation,
- * the same region as the reference, when the null is being written or
- * if the card is already marked as dirty by an earlier write.
- *
- * Under certain circumstances it is possible to avoid generating the
- * post-barrier completely if it is possible during compile time to prove
- * the object is newly allocated and that no safepoint exists between the
- * allocation and the store.
- *
- * In the case of slow allocation the allocation code must handle the barrier
- * as part of the allocation in the case the allocated object is not located
- * in the nursery; this would happen for humongous objects.
- *
- * Returns true if the post barrier can be removed
- */
-bool G1BarrierSetC2::g1_can_remove_post_barrier(GraphKit* kit,
-                                                PhaseValues* phase, Node* store,
-                                                Node* adr) const {
-  intptr_t      offset = 0;
-  Node*         base   = AddPNode::Ideal_base_and_offset(adr, phase, offset);
-  AllocateNode* alloc  = AllocateNode::Ideal_allocation(base, phase);
-
-  if (offset == Type::OffsetBot) {
-    return false; // cannot unalias unless there are precise offsets
-  }
-
-  if (alloc == nullptr) {
-     return false; // No allocation found
-  }
-
-  // Start search from Store node
-  Node* mem = store->in(MemNode::Control);
-  if (mem->is_Proj() && mem->in(0)->is_Initialize()) {
-
-    InitializeNode* st_init = mem->in(0)->as_Initialize();
-    AllocateNode*  st_alloc = st_init->allocation();
-
-    // Make sure we are looking at the same allocation
-    if (alloc == st_alloc) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 //
 // Update the card table and add card address to the queue
 //
@@ -591,76 +1044,6 @@ void G1BarrierSetC2::insert_pre_barrier(GraphKit* kit, Node* base_oop, Node* off
 }
 
 #undef __
-
-Node* G1BarrierSetC2::load_at_resolved(C2Access& access, const Type* val_type) const {
-  DecoratorSet decorators = access.decorators();
-  Node* adr = access.addr().node();
-  Node* obj = access.base();
-
-  bool anonymous = (decorators & C2_UNSAFE_ACCESS) != 0;
-  bool mismatched = (decorators & C2_MISMATCHED) != 0;
-  bool unknown = (decorators & ON_UNKNOWN_OOP_REF) != 0;
-  bool in_heap = (decorators & IN_HEAP) != 0;
-  bool in_native = (decorators & IN_NATIVE) != 0;
-  bool on_weak = (decorators & ON_WEAK_OOP_REF) != 0;
-  bool on_phantom = (decorators & ON_PHANTOM_OOP_REF) != 0;
-  bool is_unordered = (decorators & MO_UNORDERED) != 0;
-  bool no_keepalive = (decorators & AS_NO_KEEPALIVE) != 0;
-  bool is_mixed = !in_heap && !in_native;
-  bool need_cpu_mem_bar = !is_unordered || mismatched || is_mixed;
-
-  Node* top = Compile::current()->top();
-  Node* offset = adr->is_AddP() ? adr->in(AddPNode::Offset) : top;
-
-  // If we are reading the value of the referent field of a Reference
-  // object (either by using Unsafe directly or through reflection)
-  // then, if G1 is enabled, we need to record the referent in an
-  // SATB log buffer using the pre-barrier mechanism.
-  // Also we need to add memory barrier to prevent commoning reads
-  // from this field across safepoint since GC can change its value.
-  bool need_read_barrier = (((on_weak || on_phantom) && !no_keepalive) ||
-                            (in_heap && unknown && offset != top && obj != top));
-
-  if (!access.is_oop() || !need_read_barrier) {
-    return CardTableBarrierSetC2::load_at_resolved(access, val_type);
-  }
-
-  assert(access.is_parse_access(), "entry not supported at optimization time");
-
-  C2ParseAccess& parse_access = static_cast<C2ParseAccess&>(access);
-  GraphKit* kit = parse_access.kit();
-  Node* load;
-
-  Node* control =  kit->control();
-  const TypePtr* adr_type = access.addr().type();
-  MemNode::MemOrd mo = access.mem_node_mo();
-  bool requires_atomic_access = (decorators & MO_UNORDERED) == 0;
-  bool unaligned = (decorators & C2_UNALIGNED) != 0;
-  bool unsafe = (decorators & C2_UNSAFE_ACCESS) != 0;
-  // Pinned control dependency is the strictest. So it's ok to substitute it for any other.
-  load = kit->make_load(control, adr, val_type, access.type(), adr_type, mo,
-      LoadNode::Pinned, requires_atomic_access, unaligned, mismatched, unsafe,
-      access.barrier_data());
-
-
-  if (on_weak || on_phantom) {
-    // Use the pre-barrier to record the value in the referent field
-    pre_barrier(kit, false /* do_load */,
-                kit->control(),
-                nullptr /* obj */, nullptr /* adr */, max_juint /* alias_idx */, nullptr /* val */, nullptr /* val_type */,
-                load /* pre_val */, T_OBJECT);
-    // Add memory barrier to prevent commoning reads from this field
-    // across safepoint since GC can change its value.
-    kit->insert_mem_bar(Op_MemBarCPUOrder);
-  } else if (unknown) {
-    // We do not require a mem bar inside pre_barrier if need_mem_bar
-    // is set: the barriers would be emitted by us.
-    insert_pre_barrier(kit, obj, offset, load, !need_cpu_mem_bar);
-  }
-
-  return load;
-}
-
 bool G1BarrierSetC2::is_gc_barrier_node(Node* node) const {
   if (CardTableBarrierSetC2::is_gc_barrier_node(node)) {
     return true;
@@ -1055,3 +1438,4 @@ bool G1BarrierSetC2::escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseG
   }
   return false;
 }
+#endif // !AARCH64

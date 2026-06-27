@@ -859,6 +859,17 @@ const TypePtr* MemNode::calculate_adr_type(const Type* t, const TypePtr* cross_c
   }
 }
 
+#ifdef AARCH64
+uint8_t MemNode::barrier_data(const Node* n) {
+  if (n->is_LoadStore()) {
+    return n->as_LoadStore()->barrier_data();
+  } else if (n->is_Mem()) {
+    return n->as_Mem()->barrier_data();
+  }
+  return 0;
+}
+
+#endif /* AARCH64 */
 //=============================================================================
 // Should LoadNode::Ideal() attempt to remove control edges?
 bool LoadNode::can_remove_control() const {
@@ -3872,6 +3883,13 @@ intptr_t InitializeNode::can_capture_store(StoreNode* st, PhaseGVN* phase, bool 
   Node* mem = st->in(MemNode::Memory);
   if (!(mem->is_Proj() && mem->in(0) == this))
     return FAIL;                // must not be preceded by other stores
+#ifdef AARCH64
+  BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
+  if ((st->Opcode() == Op_StoreP || st->Opcode() == Op_StoreN) &&
+      !bs->can_initialize_object(st)) {
+    return FAIL;
+  }
+#endif /* AARCH64 */
   Node* adr = st->in(MemNode::Address);
   intptr_t offset;
   AllocateNode* alloc = AllocateNode::Ideal_allocation(adr, phase, offset);

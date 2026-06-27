@@ -120,24 +120,39 @@ public:
 
 typedef ZArenaHashtable<intptr_t, bool, 4> ZOffsetTable;
 
+#ifndef AARCH64
 class ZBarrierSetC2State : public ArenaObj {
+#else /* AARCH64 */
+class ZBarrierSetC2State : public BarrierSetC2State {
+#endif /* AARCH64 */
 private:
   GrowableArray<ZBarrierStubC2*>* _stubs;
+#ifndef AARCH64
   Node_Array                      _live;
+#endif /* ! AARCH64 */
   int                             _trampoline_stubs_count;
   int                             _stubs_start_offset;
 
 public:
+#ifndef AARCH64
   ZBarrierSetC2State(Arena* arena)
     : _stubs(new (arena) GrowableArray<ZBarrierStubC2*>(arena, 8,  0, nullptr)),
       _live(arena),
       _trampoline_stubs_count(0),
       _stubs_start_offset(0) {}
+#else /* AARCH64 */
+  ZBarrierSetC2State(Arena* arena)
+    : BarrierSetC2State(arena),
+      _stubs(new (arena) GrowableArray<ZBarrierStubC2*>(arena, 8,  0, nullptr)),
+      _trampoline_stubs_count(0),
+      _stubs_start_offset(0) {}
+#endif /* AARCH64 */
 
   GrowableArray<ZBarrierStubC2*>* stubs() {
     return _stubs;
   }
 
+#ifndef AARCH64
   RegMask* live(const Node* node) {
     if (!node->is_Mach()) {
       // Don't need liveness for non-MachNodes
@@ -158,6 +173,16 @@ public:
 
     return live;
   }
+#else /* AARCH64 */
+  bool needs_liveness_data(const MachNode* mach) const {
+    // Don't need liveness data for nodes without barriers
+    return mach->barrier_data() != ZBarrierElided;
+  }
+
+  bool needs_livein_data() const {
+    return true;
+  }
+#endif /* AARCH64 */
 
   void inc_trampoline_stubs_count() {
     assert(_trampoline_stubs_count != INT_MAX, "Overflow");
@@ -201,6 +226,7 @@ int ZBarrierStubC2::stubs_start_offset() {
   return barrier_set_state()->stubs_start_offset();
 }
 
+#ifndef AARCH64
 ZBarrierStubC2::ZBarrierStubC2(const MachNode* node)
   : _node(node),
     _entry(),
@@ -225,6 +251,11 @@ Label* ZBarrierStubC2::entry() {
 Label* ZBarrierStubC2::continuation() {
   return &_continuation;
 }
+#endif /* ! AARCH64 */
+
+#ifdef AARCH64
+ZBarrierStubC2::ZBarrierStubC2(const MachNode* node) : BarrierStubC2(node) {}
+#endif /* AARCH64 */
 
 ZLoadBarrierStubC2* ZLoadBarrierStubC2::create(const MachNode* node, Address ref_addr, Register ref) {
   AARCH64_ONLY(fatal("Should use ZLoadBarrierStubC2Aarch64::create"));
@@ -240,6 +271,11 @@ ZLoadBarrierStubC2::ZLoadBarrierStubC2(const MachNode* node, Address ref_addr, R
     _ref(ref) {
   assert_different_registers(ref, ref_addr.base());
   assert_different_registers(ref, ref_addr.index());
+#ifdef AARCH64
+  // The runtime call updates the value of ref, so we should not spill and
+  // reload its outdated value.
+  dont_preserve(ref);
+#endif /* AARCH64 */
 }
 
 Address ZLoadBarrierStubC2::ref_addr() const {
@@ -250,10 +286,12 @@ Register ZLoadBarrierStubC2::ref() const {
   return _ref;
 }
 
+#ifndef AARCH64
 Register ZLoadBarrierStubC2::result() const {
   return ref();
 }
 
+#endif /* ! AARCH64 */
 address ZLoadBarrierStubC2::slow_path() const {
   const uint8_t barrier_data = _node->barrier_data();
   DecoratorSet decorators = DECORATORS_NONE;
@@ -312,10 +350,12 @@ bool ZStoreBarrierStubC2::is_atomic() const {
   return _is_atomic;
 }
 
+#ifndef AARCH64
 Register ZStoreBarrierStubC2::result() const {
   return noreg;
 }
 
+#endif /* ! AARCH64 */
 void ZStoreBarrierStubC2::emit_code(MacroAssembler& masm) {
   ZBarrierSet::assembler()->generate_c2_store_barrier_stub(&masm, static_cast<ZStoreBarrierStubC2*>(this));
 }
@@ -363,6 +403,22 @@ int ZBarrierSetC2::estimate_stub_size() const {
   return size;
 }
 
+#ifdef AARCH64
+uint ZBarrierSetC2::estimated_barrier_size(const Node* node) const {
+  uint8_t barrier_data = MemNode::barrier_data(node);
+  assert(barrier_data != 0, "should be a barrier node");
+  uint uncolor_or_color_size = node->is_Load() ? 1 : 2;
+  if ((barrier_data & ZBarrierElided) != 0) {
+    return uncolor_or_color_size;
+  }
+  // A compare and branch corresponds to approximately four fast-path Ideal
+  // nodes (Cmp, Bool, If, If projection). The slow path (If projection and
+  // runtime call) is excluded since the corresponding code is laid out
+  // separately and does not directly affect performance.
+  return uncolor_or_color_size + 4;
+}
+
+#endif /* AARCH64 */
 static void set_barrier_data(C2Access& access) {
   if (!ZBarrierSet::barrier_needed(access.decorators(), access.type())) {
     return;
@@ -434,6 +490,7 @@ bool ZBarrierSetC2::array_copy_requires_gc_barriers(bool tightly_coupled_alloc, 
   return type == T_OBJECT || type == T_ARRAY;
 }
 
+#ifndef AARCH64
 // This TypeFunc assumes a 64bit system
 static const TypeFunc* clone_type() {
   // Create input type (domain)
@@ -451,6 +508,7 @@ static const TypeFunc* clone_type() {
   return TypeFunc::make(domain, range);
 }
 
+#endif /* ! AARCH64 */
 #define XTOP LP64_ONLY(COMMA phase->top())
 
 void ZBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* ac) const {
@@ -506,6 +564,7 @@ void ZBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* a
     return;
   }
 
+#ifndef AARCH64
   // Clone instance
   Node* const ctrl       = ac->in(TypeFunc::Control);
   Node* const mem        = ac->in(TypeFunc::Memory);
@@ -531,6 +590,12 @@ void ZBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* a
                                            phase->top());
   phase->transform_later(call);
   phase->igvn().replace_node(ac, call);
+#else /* AARCH64 */
+  // Clone instance or array where 'src' is only known to be an object (ary_ptr
+  // is null). This can happen in bytecode generated dynamically to implement
+  // reflective array clones.
+  clone_in_runtime(phase, ac, ZBarrierSetRuntime::clone_addr(), "ZBarrierSetRuntime::clone");
+#endif /* AARCH64 */
 }
 
 #undef XTOP
@@ -872,6 +937,7 @@ void ZBarrierSetC2::analyze_dominating_barriers() const {
   analyze_dominating_barriers_impl(atomics, atomic_dominators);
 }
 
+#ifndef AARCH64
 // == Reduced spilling optimization ==
 
 void ZBarrierSetC2::compute_liveness_at_stubs() const {
@@ -946,6 +1012,7 @@ void ZBarrierSetC2::compute_liveness_at_stubs() const {
     }
   }
 }
+#endif /* ! AARCH64 */
 
 void ZBarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {
   eliminate_gc_barrier_data(node);

@@ -845,7 +845,8 @@ Compile::Compile( ciEnv* ci_env, ciMethod* target, int osr_bci,
   if (failing())  return;
   NOT_PRODUCT( verify_graph_edges(); )
 
-  if (StressLCM || StressGCM || StressIGVN || StressCCP || StressIncrementalInlining) {
+  if (StressLCM || StressGCM || StressIGVN || StressCCP ||
+      StressIncrementalInlining AARCH64_ONLY(|| StressMacroExpansion)) {
     initialize_stress_seed(directive);
   }
 
@@ -2438,12 +2439,19 @@ void Compile::Optimize() {
 
   {
     TracePhase tp("macroExpand", &timers[_t_macroExpand]);
+#ifdef AARCH64
+    print_method(PHASE_BEFORE_MACRO_EXPANSION, 3);
+#endif /* AARCH64 */
     PhaseMacroExpand  mex(igvn);
     if (mex.expand_macro_nodes()) {
       assert(failing(), "must bail out w/ explicit message");
       return;
     }
+#ifdef AARCH64
+    print_method(PHASE_AFTER_MACRO_EXPANSION, 2);
+#else
     print_method(PHASE_MACRO_EXPANSION, 2);
+#endif /* AARCH64 */
   }
 
   {
@@ -5149,6 +5157,18 @@ void CloneMap::dump(node_idx_t key, outputStream* st) const {
     ni.dump_on(st);
   }
 }
+
+#ifdef AARCH64
+void Compile::shuffle_macro_nodes() {
+  if (_macro_nodes.length() < 2) {
+    return;
+  }
+  for (uint i = _macro_nodes.length() - 1; i >= 1; i--) {
+    uint j = C->random() % (i + 1);
+    swap(_macro_nodes.at(i), _macro_nodes.at(j));
+  }
+}
+#endif /* AARCH64 */
 
 // Move Allocate nodes to the start of the list
 void Compile::sort_macro_nodes() {

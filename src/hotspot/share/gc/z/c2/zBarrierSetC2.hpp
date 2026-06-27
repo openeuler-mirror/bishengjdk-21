@@ -41,12 +41,18 @@ class MachNode;
 
 class MacroAssembler;
 
+#ifndef AARCH64
 class ZBarrierStubC2 : public ArenaObj {
+#else /* AARCH64 */
+class ZBarrierStubC2 : public BarrierStubC2 {
+#endif /* AARCH64 */
 protected:
+#ifndef AARCH64
   const MachNode* _node;
   Label           _entry;
   Label           _continuation;
 
+#endif /* ! AARCH64 */
 static void register_stub(ZBarrierStubC2* stub);
 static void inc_trampoline_stubs_count();
 static int trampoline_stubs_count();
@@ -55,11 +61,13 @@ static int stubs_start_offset();
   ZBarrierStubC2(const MachNode* node);
 
 public:
+#ifndef AARCH64
   RegMask& live() const;
   Label* entry();
   Label* continuation();
 
   virtual Register result() const = 0;
+#endif /* ! AARCH64 */
   virtual void emit_code(MacroAssembler& masm) = 0;
 };
 
@@ -78,7 +86,9 @@ public:
   Register ref() const;
   address slow_path() const;
 
+#ifndef AARCH64
   virtual Register result() const;
+#endif /* ! AARCH64 */
   virtual void emit_code(MacroAssembler& masm);
 };
 
@@ -102,13 +112,17 @@ public:
   bool is_native() const;
   bool is_atomic() const;
 
+#ifndef AARCH64
   virtual Register result() const;
+#endif /* ! AARCH64 */
   virtual void emit_code(MacroAssembler& masm);
 };
 
 class ZBarrierSetC2 : public BarrierSetC2 {
 private:
+#ifndef AARCH64
   void compute_liveness_at_stubs() const;
+#endif /* ! AARCH64 */
   void analyze_dominating_barriers_impl(Node_List& accesses, Node_List& access_dominators) const;
   void analyze_dominating_barriers() const;
 
@@ -128,6 +142,9 @@ protected:
                                         const Type* val_type) const;
 
 public:
+#ifdef AARCH64
+  virtual uint estimated_barrier_size(const Node* node) const;
+#endif /* AARCH64 */
   virtual void* create_barrier_state(Arena* comp_arena) const;
   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc,
                                                BasicType type,

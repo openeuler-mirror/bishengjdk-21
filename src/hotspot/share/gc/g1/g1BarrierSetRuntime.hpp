@@ -35,6 +35,10 @@ class oopDesc;
 class JavaThread;
 
 class G1BarrierSetRuntime: public AllStatic {
+#ifdef AARCH64
+private:
+  static void clone(oopDesc* src, oopDesc* dst, size_t size);
+#endif /* AARCH64 */
 public:
   using CardValue = G1CardTable::CardValue;
 
@@ -46,6 +50,9 @@ public:
   // C2 slow-path runtime calls.
   static void write_ref_field_pre_entry(oopDesc* orig, JavaThread *thread);
   static void write_ref_field_post_entry(volatile CardValue* card_addr, JavaThread* thread);
+#ifdef AARCH64
+  static address clone_addr();
+#endif /* AARCH64 */
 };
 
 #endif // SHARE_GC_G1_G1BARRIERSETRUNTIME_HPP

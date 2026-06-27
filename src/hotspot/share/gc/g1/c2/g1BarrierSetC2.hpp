@@ -31,8 +31,65 @@ class PhaseTransform;
 class Type;
 class TypeFunc;
 
+#ifdef AARCH64
+const int G1C2BarrierPre         = 1;
+const int G1C2BarrierPost        = 2;
+const int G1C2BarrierPostNotNull = 4;
+
+class G1BarrierStubC2 : public BarrierStubC2 {
+public:
+  G1BarrierStubC2(const MachNode* node);
+  virtual void emit_code(MacroAssembler& masm) = 0;
+};
+
+class G1PreBarrierStubC2 : public G1BarrierStubC2 {
+private:
+  Register _obj;
+  Register _pre_val;
+  Register _thread;
+  Register _tmp1;
+  Register _tmp2;
+
+protected:
+  G1PreBarrierStubC2(const MachNode* node);
+
+public:
+  static bool needs_barrier(const MachNode* node);
+  static G1PreBarrierStubC2* create(const MachNode* node);
+  void initialize_registers(Register obj, Register pre_val, Register thread, Register tmp1 = noreg, Register tmp2 = noreg);
+  Register obj() const;
+  Register pre_val() const;
+  Register thread() const;
+  Register tmp1() const;
+  Register tmp2() const;
+  virtual void emit_code(MacroAssembler& masm);
+};
+
+class G1PostBarrierStubC2 : public G1BarrierStubC2 {
+private:
+  Register _thread;
+  Register _tmp1;
+  Register _tmp2;
+  Register _tmp3;
+
+protected:
+  G1PostBarrierStubC2(const MachNode* node);
+
+public:
+  static bool needs_barrier(const MachNode* node);
+  static G1PostBarrierStubC2* create(const MachNode* node);
+  void initialize_registers(Register thread, Register tmp1 = noreg, Register tmp2 = noreg, Register tmp3 = noreg);
+  Register thread() const;
+  Register tmp1() const;
+  Register tmp2() const;
+  Register tmp3() const;
+  virtual void emit_code(MacroAssembler& masm);
+};
+#endif // AARCH64
+
 class G1BarrierSetC2: public CardTableBarrierSetC2 {
 protected:
+#ifndef AARCH64
   virtual void pre_barrier(GraphKit* kit,
                            bool do_load,
                            Node* ctl,
@@ -54,6 +111,7 @@ protected:
                             BasicType bt,
                             bool use_precise) const;
 
+#endif // !AARCH64
   bool g1_can_remove_pre_barrier(GraphKit* kit,
                                  PhaseValues* phase,
                                  Node* adr,
@@ -64,6 +122,9 @@ protected:
                                   PhaseValues* phase, Node* store,
                                   Node* adr) const;
 
+#ifdef AARCH64
+  int get_store_barrier(C2Access& access) const;
+#else
   void g1_mark_card(GraphKit* kit,
                     IdealKit& ideal,
                     Node* card_adr,
@@ -81,9 +142,18 @@ protected:
 
   static const TypeFunc* write_ref_field_pre_entry_Type();
   static const TypeFunc* write_ref_field_post_entry_Type();
+#endif // AARCH64
 
   virtual Node* load_at_resolved(C2Access& access, const Type* val_type) const;
 
+#ifdef AARCH64
+  virtual Node* store_at_resolved(C2Access& access, C2AccessValue& val) const;
+  virtual Node* atomic_cmpxchg_val_at_resolved(C2AtomicParseAccess& access, Node* expected_val,
+                                               Node* new_val, const Type* value_type) const;
+  virtual Node* atomic_cmpxchg_bool_at_resolved(C2AtomicParseAccess& access, Node* expected_val,
+                                                Node* new_val, const Type* value_type) const;
+  virtual Node* atomic_xchg_at_resolved(C2AtomicParseAccess& access, Node* new_val, const Type* value_type) const;
+#else
 #ifdef ASSERT
   bool has_cas_in_use_chain(Node* x) const;
   void verify_pre_load(Node* marking_check_if, Unique_Node_List& loads /*output*/) const;
@@ -91,7 +161,25 @@ protected:
 #endif
 
   static bool is_g1_pre_val_load(Node* n);
+#endif // AARCH64
+
 public:
+#ifdef AARCH64
+  virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
+  virtual void eliminate_gc_barrier_data(Node* node) const;
+  virtual bool expand_barriers(Compile* C, PhaseIterGVN& igvn) const;
+  virtual uint estimated_barrier_size(const Node* node) const;
+  virtual bool can_initialize_object(const StoreNode* store) const;
+  virtual void clone_at_expansion(PhaseMacroExpand* phase,
+                                  ArrayCopyNode* ac) const;
+  virtual void* create_barrier_state(Arena* comp_arena) const;
+  virtual void emit_stubs(CodeBuffer& cb) const;
+  virtual void late_barrier_analysis() const;
+
+#ifndef PRODUCT
+  virtual void dump_barrier_data(const MachNode* mach, outputStream* st) const;
+#endif
+#else
   virtual bool is_gc_pre_barrier_node(Node* node) const;
   virtual bool is_gc_barrier_node(Node* node) const;
   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
@@ -102,6 +190,7 @@ public:
 #endif
 
   virtual bool escape_add_to_con_graph(ConnectionGraph* conn_graph, PhaseGVN* gvn, Unique_Node_List* delayed_worklist, Node* n, uint opcode) const;
+#endif // AARCH64
 };
 
 #endif // SHARE_GC_G1_C2_G1BARRIERSETC2_HPP

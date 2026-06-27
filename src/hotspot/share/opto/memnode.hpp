@@ -145,6 +145,11 @@ public:
 #endif
   }
 
+#ifdef AARCH64
+  // Return the barrier data of n, if available, or 0 otherwise.
+  static uint8_t barrier_data(const Node* n);
+
+#endif /* AARCH64 */
   uint8_t barrier_data() { return _barrier_data; }
   void set_barrier_data(uint8_t barrier_data) { _barrier_data = barrier_data; }
 
