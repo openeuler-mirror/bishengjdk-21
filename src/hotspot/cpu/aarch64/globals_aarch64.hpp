@@ -111,6 +111,9 @@ define_pd_global(intx, InlineSmallCode,          1000);
   product(uint, UseSVE, 0,                                              \
           "Highest supported SVE instruction set version")              \
           range(0, 2)                                                   \
+  product(bool, UseHisiOptimizations, false,                            \
+          "Use HiSilicon-specific optimizations controlled by their "    \
+          "individual flags")                                           \
   product(bool, UseSVEHashCodeIntrinsic, false,                         \
           "Use SVE2 instructions in the vectorized hashcode intrinsic") \
   product(bool, UseStreamPrefetchForArrayCopy, false,                   \

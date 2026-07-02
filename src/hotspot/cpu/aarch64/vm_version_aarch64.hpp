@@ -115,10 +115,6 @@ enum Ampere_CPU_Model {
     CPU_MODEL_AMPERE_1B = 0xac5  /* AMPERE_1B core Implements ARMv8.7 with CSSC, MTE, SM3/SM4 extensions */
 };
 
-enum HiSilicon_CPU_Model {
-    CPU_MODEL_HISILICON_950 = 0xd06
-};
-
 #define CPU_FEATURE_FLAGS(decl)               \
     decl(FP,            fp,            0)     \
     decl(ASIMD,         asimd,         1)     \

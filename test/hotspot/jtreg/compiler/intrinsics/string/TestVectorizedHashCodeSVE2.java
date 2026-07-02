@@ -142,6 +142,7 @@ public class TestVectorizedHashCodeSVE2 {
         command.add("-XX:+UnlockDiagnosticVMOptions");
         command.add("-XX:+WhiteBoxAPI");
         command.add("-XX:+UseVectorizedHashCodeIntrinsic");
+        command.add("-XX:+UseHisiOptimizations");
         command.add("-XX:+UseSVEHashCodeIntrinsic");
         command.add("-XX:UseSVE=2");
         for (String flag : extraFlags) {

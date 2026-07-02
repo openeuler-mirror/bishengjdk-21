@@ -21,18 +21,15 @@
  * questions.
  */
 
-package compiler.memoryinitialization;
-
-import java.util.Arrays;
-
-/**
+/*
  * @test
  * @summary Test AArch64 SVE small-block zeroing and its disabled fallback.
  * @requires os.arch == "aarch64"
  *
  * @run main/othervm/timeout=300 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+IgnoreUnrecognizedVMOptions
- *      -XX:+UseSVESmallBlockZeroing -XX:SVESmallBlockZeroingMaxWords=256
+ *      -XX:+UseHisiOptimizations -XX:+UseSVESmallBlockZeroing
+ *      -XX:SVESmallBlockZeroingMaxWords=256
  *      compiler.memoryinitialization.TestSVESmallBlockZeroing
  * @run main/othervm/timeout=300 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+IgnoreUnrecognizedVMOptions
@@ -40,9 +37,14 @@ import java.util.Arrays;
  *      compiler.memoryinitialization.TestSVESmallBlockZeroing
  * @run main/othervm/timeout=300 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+IgnoreUnrecognizedVMOptions
- *      -XX:UseSVE=0 -XX:+UseSVESmallBlockZeroing
+ *      -XX:+UseHisiOptimizations -XX:UseSVE=0 -XX:+UseSVESmallBlockZeroing
  *      compiler.memoryinitialization.TestSVESmallBlockZeroing
  */
+
+package compiler.memoryinitialization;
+
+import java.util.Arrays;
+
 public class TestSVESmallBlockZeroing {
     private static final int[] LENGTHS = {
             0, 1, 2, 3, 4, 5, 6, 7,

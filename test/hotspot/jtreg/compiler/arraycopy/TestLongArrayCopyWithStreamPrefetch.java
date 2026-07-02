@@ -21,24 +21,27 @@
  * questions.
  */
 
-package compiler.arraycopy;
-
-import java.util.Arrays;
-
-/**
+/*
  * @test
  * @summary Test long[] arraycopy with the AArch64 streaming-prefetch copy path enabled.
  * @requires os.arch == "aarch64"
  *
  * @run main/othervm/timeout=300 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+IgnoreUnrecognizedVMOptions
- *      -XX:+UseStreamPrefetchForArrayCopy -XX:StreamPrefetchArrayCopyMinLongs=8
+ *      -XX:+UseHisiOptimizations -XX:+UseStreamPrefetchForArrayCopy
+ *      -XX:StreamPrefetchArrayCopyMinLongs=8
  *      compiler.arraycopy.TestLongArrayCopyWithStreamPrefetch
  * @run main/othervm/timeout=300 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+IgnoreUnrecognizedVMOptions -XX:-UseSIMDForMemoryOps
- *      -XX:+UseStreamPrefetchForArrayCopy -XX:StreamPrefetchArrayCopyMinLongs=8
+ *      -XX:+UseHisiOptimizations -XX:+UseStreamPrefetchForArrayCopy
+ *      -XX:StreamPrefetchArrayCopyMinLongs=8
  *      compiler.arraycopy.TestLongArrayCopyWithStreamPrefetch
  */
+
+package compiler.arraycopy;
+
+import java.util.Arrays;
+
 public class TestLongArrayCopyWithStreamPrefetch {
     private static final int[] LENGTHS = {
             0, 1, 2, 3, 4, 5, 6, 7,

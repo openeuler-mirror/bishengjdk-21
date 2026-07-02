@@ -41,7 +41,8 @@
  * @run main/othervm -Xbootclasspath/a:. -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI
  *      -XX:CompileCommand=inline,java.lang.String::equals
  *      -XX:-UseOnStackReplacement -XX:-BackgroundCompilation
- *      -XX:-UseSimpleArrayEquals -XX:+UseSIMDForArrayEquals -XX:+UseSIMDForStringEquals
+ *      -XX:-UseSimpleArrayEquals -XX:+UseSIMDForArrayEquals
+ *      -XX:+UseHisiOptimizations -XX:+UseSIMDForStringEquals
  *      compiler.intrinsics.string.TestStringEqualsLongUTF16
  */
 

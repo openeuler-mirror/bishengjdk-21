@@ -30,19 +30,19 @@
  *
  * @run main/othervm/timeout=240 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+UseVectorizedHashCodeIntrinsic
- *      -XX:+UseSVEHashCodeIntrinsic -XX:UseSVE=0
+ *      -XX:+UseHisiOptimizations -XX:+UseSVEHashCodeIntrinsic -XX:UseSVE=0
  *      -XX:CompileCommand=compileonly,compiler.intrinsics.string.TestVectorizedHashCode::vector*
  *      compiler.intrinsics.string.TestVectorizedHashCode
  *
  * @run main/othervm/timeout=240 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+UseVectorizedHashCodeIntrinsic
- *      -XX:+UseSVEHashCodeIntrinsic -XX:UseSVE=1
+ *      -XX:+UseHisiOptimizations -XX:+UseSVEHashCodeIntrinsic -XX:UseSVE=1
  *      -XX:CompileCommand=compileonly,compiler.intrinsics.string.TestVectorizedHashCode::vector*
  *      compiler.intrinsics.string.TestVectorizedHashCode
  *
  * @run main/othervm/timeout=240 -Xbatch -XX:-TieredCompilation -XX:CompileThreshold=100
  *      -XX:+UnlockDiagnosticVMOptions -XX:+UseVectorizedHashCodeIntrinsic
- *      -XX:+UseSVEHashCodeIntrinsic -XX:UseSVE=2
+ *      -XX:+UseHisiOptimizations -XX:+UseSVEHashCodeIntrinsic -XX:UseSVE=2
  *      -XX:CompileCommand=compileonly,compiler.intrinsics.string.TestVectorizedHashCode::vector*
  *      compiler.intrinsics.string.TestVectorizedHashCode
  *
