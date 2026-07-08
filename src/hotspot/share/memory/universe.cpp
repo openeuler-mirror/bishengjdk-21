@@ -29,6 +29,9 @@
 #include "cds/metaspaceShared.hpp"
 #include "classfile/classLoader.hpp"
 #include "classfile/classLoaderDataGraph.hpp"
+#ifdef AARCH64
+#include "classfile/bytecodeEnhancement.hpp"
+#endif
 #include "classfile/javaClasses.hpp"
 #include "classfile/stringTable.hpp"
 #include "classfile/symbolTable.hpp"
@@ -365,6 +368,12 @@ void Universe::genesis(TRAPS) {
     }
 
     vmSymbols::initialize();
+
+#ifdef AARCH64
+    if (BytecodeEnhancement::is_enabled()) {
+      BytecodeEnhancement::initialize();
+    }
+#endif
 
     SystemDictionary::initialize(CHECK);
 

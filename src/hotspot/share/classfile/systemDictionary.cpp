@@ -24,6 +24,9 @@
 
 #include "precompiled.hpp"
 #include "cds/heapShared.hpp"
+#ifdef AARCH64
+#include "classfile/bytecodeEnhancement.hpp"
+#endif
 #include "classfile/classFileParser.hpp"
 #include "classfile/classFileStream.hpp"
 #include "classfile/classLoader.hpp"
@@ -1245,6 +1248,120 @@ void SystemDictionary::load_shared_class_misc(InstanceKlass* ik, ClassLoaderData
 
 #endif // INCLUDE_CDS
 
+#ifdef AARCH64
+
+static Handle bytecode_enhancement_protection_domain(Handle class_loader, const char* source, TRAPS) {
+  if (source == nullptr) {
+    return Handle();
+  }
+
+  Handle path = java_lang_String::create_from_str(source, CHECK_NH);
+  JavaValue url_result(T_OBJECT);
+  JavaCalls::call_static(&url_result,
+                         vmClasses::jdk_internal_loader_ClassLoaders_klass(),
+                         vmSymbols::toFileURL_name(),
+                         vmSymbols::toFileURL_signature(),
+                         path,
+                         CHECK_NH);
+  Handle url(THREAD, url_result.get_oop());
+  if (url.is_null()) {
+    log_warning(class, load, enhancement)("Cannot create bytecode enhancement CodeSource URL for %s", source);
+    return Handle();
+  }
+
+  Handle code_source = JavaCalls::construct_new_instance(vmClasses::CodeSource_klass(),
+                                                         vmSymbols::url_code_signer_array_void_signature(),
+                                                         url,
+                                                         Handle(),
+                                                         CHECK_NH);
+  JavaCallArguments args;
+  args.push_oop(code_source);
+  args.push_oop(Handle());
+  args.push_oop(class_loader);
+  args.push_oop(Handle());
+  TempNewSymbol pd_signature = SymbolTable::new_symbol("(Ljava/security/CodeSource;Ljava/security/PermissionCollection;Ljava/lang/ClassLoader;[Ljava/security/Principal;)V");
+  return JavaCalls::construct_new_instance(vmClasses::ProtectionDomain_klass(), pd_signature, &args, CHECK_NH);
+}
+
+static void restore_bytecode_enhancement_saved_exception(Handle saved_exception, const char* saved_exception_file,
+                                                   int saved_exception_line, TRAPS) {
+  if (HAS_PENDING_EXCEPTION) {
+    CLEAR_PENDING_EXCEPTION;
+  }
+  if (saved_exception.not_null()) {
+    THREAD->set_pending_exception(saved_exception(), saved_exception_file, saved_exception_line);
+  }
+}
+
+static void handle_bytecode_enhancement_add_failure(Symbol* class_name, const char* reason, TRAPS) {
+  ResourceMark rm(THREAD);
+  stringStream failure_message;
+  if (HAS_PENDING_EXCEPTION) {
+    oop exception = PENDING_EXCEPTION;
+    const char* exception_name = exception->klass()->external_name();
+    oop throwable_message = java_lang_Throwable::message(exception);
+    if (throwable_message != nullptr) {
+      char* message_str = java_lang_String::as_utf8_string(throwable_message);
+      failure_message.print("Bytecode enhancement failed to add class %s: %s: %s: %s",
+                            class_name->as_C_string(), reason, exception_name, message_str);
+    } else {
+      failure_message.print("Bytecode enhancement failed to add class %s: %s: %s",
+                            class_name->as_C_string(), reason, exception_name);
+    }
+  } else {
+    failure_message.print("Bytecode enhancement failed to add class %s: %s", class_name->as_C_string(), reason);
+  }
+  BytecodeEnhancement::handle_failure(failure_message.as_string());
+}
+
+static void warn_or_exit_bytecode_enhancement_add_conflict(Symbol* class_name) {
+  ResourceMark rm;
+  BytecodeEnhancement::handle_failure(err_msg(
+      "Bytecode enhancement class-add ignored for %s because the class already exists",
+      class_name->as_C_string()));
+}
+
+static InstanceKlass* try_load_bytecode_enhancement_added_class(Symbol* class_name, Handle class_loader,
+                                                          ClassLoaderData* loader_data, TRAPS) {
+  assert(BytecodeEnhancement::is_enabled(), "sanity");
+  assert(BytecodeEnhancement::should_add_class(class_name, loader_data), "sanity");
+
+  ResourceMark rm(THREAD);
+  Handle saved_exception;
+  const char* saved_exception_file = nullptr;
+  int saved_exception_line = 0;
+  if (HAS_PENDING_EXCEPTION) {
+    saved_exception = Handle(THREAD, PENDING_EXCEPTION);
+    saved_exception_file = THREAD->exception_file();
+    saved_exception_line = THREAD->exception_line();
+    CLEAR_PENDING_EXCEPTION;
+  }
+
+  ClassFileStream* stream = BytecodeEnhancement::open_added_class_stream(class_name, loader_data, THREAD);
+  if (HAS_PENDING_EXCEPTION || stream == nullptr) {
+    handle_bytecode_enhancement_add_failure(class_name, "cannot open class file", THREAD);
+    restore_bytecode_enhancement_saved_exception(saved_exception, saved_exception_file, saved_exception_line, THREAD);
+    return nullptr;
+  }
+
+  Handle protection_domain = bytecode_enhancement_protection_domain(class_loader, stream->source(), THREAD);
+  if (HAS_PENDING_EXCEPTION) {
+    handle_bytecode_enhancement_add_failure(class_name, "cannot create protection domain", THREAD);
+    restore_bytecode_enhancement_saved_exception(saved_exception, saved_exception_file, saved_exception_line, THREAD);
+    return nullptr;
+  }
+  ClassLoadInfo cl_info(protection_domain);
+  InstanceKlass* added_class = SystemDictionary::resolve_from_stream(stream, class_name, class_loader, cl_info, THREAD);
+  if (HAS_PENDING_EXCEPTION || added_class == nullptr) {
+    handle_bytecode_enhancement_add_failure(class_name, "cannot define class", THREAD);
+    restore_bytecode_enhancement_saved_exception(saved_exception, saved_exception_file, saved_exception_line, THREAD);
+    return nullptr;
+  }
+  return added_class;
+}
+
+#endif // AARCH64
+
 InstanceKlass* SystemDictionary::load_instance_class_impl(Symbol* class_name, Handle class_loader, TRAPS) {
 
   if (class_loader.is_null()) {
@@ -1294,8 +1411,10 @@ InstanceKlass* SystemDictionary::load_instance_class_impl(Symbol* class_name, Ha
         // a named package within the unnamed module.  In all cases,
         // limit visibility to search for the class only in the boot
         // loader's append path.
-        if (!ClassLoader::has_bootclasspath_append()) {
-           // If there is no bootclasspath append entry, no need to continue
+        if (!ClassLoader::has_bootclasspath_append()
+            AARCH64_ONLY(&& !(BytecodeEnhancement::is_enabled()
+                              && BytecodeEnhancement::should_add_class(class_name, class_loader_data(class_loader))))) {
+           // If there is no bootclasspath append entry and no class-add action, no need to continue
            // searching.
            return nullptr;
         }
@@ -1329,6 +1448,25 @@ InstanceKlass* SystemDictionary::load_instance_class_impl(Symbol* class_name, Ha
       PerfTraceTime vmtimer(ClassLoader::perf_sys_classload_time());
       k = ClassLoader::load_class(class_name, search_only_bootloader_append, CHECK_NULL);
     }
+
+#ifdef AARCH64
+    if (BytecodeEnhancement::is_enabled()) {
+      ClassLoaderData* loader_data = class_loader_data(class_loader);
+      if (BytecodeEnhancement::should_add_class(class_name, loader_data)) {
+        if (k != nullptr) {
+          warn_or_exit_bytecode_enhancement_add_conflict(class_name);
+        } else {
+          // Class not found by the boot loader.
+          // Try the configured class-add action.
+          InstanceKlass* added_class =
+              try_load_bytecode_enhancement_added_class(class_name, class_loader, loader_data, THREAD);
+          if (added_class != nullptr) {
+            return added_class;
+          }
+        }
+      }
+    }
+#endif
 
     // find_or_define_instance_class may return a different InstanceKlass
     if (k != nullptr) {
@@ -1366,7 +1504,27 @@ InstanceKlass* SystemDictionary::load_instance_class_impl(Symbol* class_name, Ha
                             vmSymbols::loadClass_name(),
                             vmSymbols::string_class_signature(),
                             string,
-                            CHECK_NULL);
+                            THREAD);
+
+    if (HAS_PENDING_EXCEPTION) {
+#ifdef AARCH64
+      // Class not found by the platform/app loader.
+      // Try the configured class-add action.
+      // Custom loaders are not supported.
+      if (BytecodeEnhancement::is_enabled()
+          && PENDING_EXCEPTION->is_a(vmClasses::ClassNotFoundException_klass())) {
+        ClassLoaderData* loader_data = ClassLoaderData::class_loader_data(class_loader());
+        if (BytecodeEnhancement::should_add_class(class_name, loader_data)) {
+          InstanceKlass* added_class =
+              try_load_bytecode_enhancement_added_class(class_name, class_loader, loader_data, THREAD);
+          if (added_class != nullptr) {
+            return added_class;
+          }
+        }
+      }
+#endif
+      return nullptr;
+    }
 
     assert(result.get_type() == T_OBJECT, "just checking");
     oop obj = result.get_oop();
@@ -1379,6 +1537,13 @@ InstanceKlass* SystemDictionary::load_instance_class_impl(Symbol* class_name, Ha
       // the same as that requested.  This check is done for the bootstrap
       // loader when parsing the class file.
       if (class_name == k->name()) {
+#ifdef AARCH64
+        ClassLoaderData* loader_data = ClassLoaderData::class_loader_data(class_loader());
+        if (BytecodeEnhancement::is_enabled()
+            && BytecodeEnhancement::should_add_class(class_name, loader_data)) {
+          warn_or_exit_bytecode_enhancement_add_conflict(class_name);
+        }
+#endif
         return k;
       }
     }

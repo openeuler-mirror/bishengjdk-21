@@ -30,6 +30,10 @@
 #include "classfile/classLoaderData.hpp"
 #include "classfile/classLoaderData.inline.hpp"
 #include "classfile/classLoadInfo.hpp"
+#ifdef AARCH64
+#include "classfile/bytecodeEnhancement.hpp"
+#endif
+#include "classfile/javaClasses.hpp"
 #include "classfile/klassFactory.hpp"
 #include "memory/resourceArea.hpp"
 #include "prims/jvmtiEnvBase.hpp"
@@ -56,6 +60,10 @@ InstanceKlass* KlassFactory::check_shared_class_file_load_hook(
 #if INCLUDE_CDS && INCLUDE_JVMTI
   assert(ik != nullptr, "sanity");
   assert(ik->is_shared(), "expecting a shared class");
+#ifdef AARCH64
+  assert(!BytecodeEnhancement::is_enabled() || !BytecodeEnhancement::should_enhance_class(class_name),
+         "bytecode enhancement class should not be loaded from CDS");
+#endif
   if (JvmtiExport::should_post_class_file_load_hook()) {
     ResourceMark rm(THREAD);
     // Post the CFLH
@@ -213,6 +221,12 @@ InstanceKlass* KlassFactory::create_from_stream(ClassFileStream* stream,
 
   // Skip this processing for VM hidden classes
   if (!cl_info.is_hidden()) {
+#ifdef AARCH64
+    // Apply the configured replacement before invoking the JVMTI class-file load hook.
+    if (BytecodeEnhancement::is_enabled() && BytecodeEnhancement::should_enhance_class(name)) {
+      stream = BytecodeEnhancement::enhance_class_stream(name, stream, loader_data, CHECK_NULL);
+    }
+#endif
     stream = check_class_file_load_hook(stream,
                                         name,
                                         loader_data,

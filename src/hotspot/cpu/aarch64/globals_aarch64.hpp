@@ -297,6 +297,15 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
           "the path save classlist and jsa file")                       \
   product(bool, PrintAutoAppCDS, false,                                 \
           "Print path and some information about AutoSharedArchivePath")\
+                                                                        \
+  product(ccstr, BytecodeEnhancementPaths, nullptr,                     \
+          "Bytecode enhancement paths. It contains enhancement lists "  \
+          "and enhancement contents")                                   \
+  product(bool, ExitOnBytecodeEnhancementFailure, false,                \
+          "Exit the VM when a bytecode enhancement cannot be applied")  \
+  product(bool, UsePrimitiveHashSet, false,                             \
+          "Replace java.util.HashSet with the JDK internal primitive "  \
+          "implementation")                                             \
 
 // end of ARCH_FLAGS
 

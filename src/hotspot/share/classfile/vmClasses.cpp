@@ -30,6 +30,9 @@
 #include "classfile/javaClasses.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmClasses.hpp"
+#ifdef AARCH64
+#include "classfile/bytecodeEnhancement.hpp"
+#endif
 #include "classfile/vmSymbols.hpp"
 #include "gc/shared/collectedHeap.hpp"
 #include "memory/metaspaceClosure.hpp"
@@ -206,6 +209,14 @@ void vmClasses::resolve_all(TRAPS) {
   _box_klasses[T_LONG]    = vmClasses::Long_klass();
   //_box_klasses[T_OBJECT]  = vmClasses::object_klass();
   //_box_klasses[T_ARRAY]   = vmClasses::object_klass();
+
+#ifdef AARCH64
+  // Reject replacements that affect VM well-known classes or their type hierarchy
+  // while using or creating a CDS archive.
+  if (BytecodeEnhancement::is_enabled() && (UseSharedSpaces || DumpSharedSpaces)) {
+    BytecodeEnhancement::validate_vm_class_replacements_for_cds();
+  }
+#endif
 
 #ifdef ASSERT
   if (UseSharedSpaces) {

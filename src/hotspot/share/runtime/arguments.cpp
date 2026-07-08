@@ -25,6 +25,11 @@
 #include "precompiled.hpp"
 #include "cds/cds_globals.hpp"
 #include "cds/filemap.hpp"
+#ifdef AARCH64
+#include "cds/heapShared.hpp"
+#include "cds/metaspaceShared.hpp"
+#include "classfile/bytecodeEnhancement.hpp"
+#endif
 #include "classfile/classLoader.hpp"
 #include "classfile/javaAssertions.hpp"
 #include "classfile/moduleEntry.hpp"
@@ -4209,6 +4214,18 @@ jint Arguments::apply_ergo() {
   GCConfig::arguments()->initialize();
 
   set_shared_spaces_flags_and_archive_paths();
+
+#ifdef AARCH64
+  if (BytecodeEnhancementPaths != nullptr || UsePrimitiveHashSet) {
+    BytecodeEnhancement::enable();
+#if INCLUDE_CDS
+    // Enhanced JDK classes must not be coupled to archived heap objects or the
+    // archived full module graph.
+    HeapShared::disable_writing();
+    MetaspaceShared::disable_full_module_graph();
+#endif
+  }
+#endif
 
 #if INCLUDE_AGGRESSIVE_CDS
   result = init_aggressive_cds_properties();
