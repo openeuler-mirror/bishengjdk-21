@@ -354,6 +354,14 @@ class methodHandle;
    do_name(     vectorizedHashCode_name,                         "vectorizedHashCode")                                  \
    do_signature(vectorizedHashCode_signature,                    "(Ljava/lang/Object;IIII)I")                           \
                                                                                                                         \
+  do_intrinsic(_stringLatin1ToLowerCase, java_lang_StringLatin1, toLowerCaseSimple_name, stringCase_signature, F_S)     \
+   do_name(     toLowerCaseSimple_name,                    "toLowerCaseSimple")                                         \
+   do_signature(stringCase_signature,                      "([B[BII)I")                                                 \
+  do_intrinsic(_stringLatin1ToUpperCase, java_lang_StringLatin1, toUpperCaseSimple_name, stringCase_signature, F_S)     \
+   do_name(     toUpperCaseSimple_name,                    "toUpperCaseSimple")                                         \
+  do_intrinsic(_stringUTF16ToLowerCase,  java_lang_StringUTF16,  toLowerCaseSimple_name, stringCase_signature, F_S)     \
+  do_intrinsic(_stringUTF16ToUpperCase,  java_lang_StringUTF16,  toUpperCaseSimple_name, stringCase_signature, F_S)     \
+                                                                                                                        \
   do_intrinsic(_compressStringC,          java_lang_StringUTF16,  compress_name, encodeISOArray_signature,       F_S)   \
    do_name(     compress_name,                                   "compress")                                            \
   do_intrinsic(_compressStringB,          java_lang_StringUTF16,  compress_name, indexOfI_signature,             F_S)   \

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -23,31 +23,28 @@
 # questions.
 #
 
-ifndef _TOOLS_HOTSPOT_GMK
-_TOOLS_HOTSPOT_GMK := 1
-
-include JavaCompilation.gmk
-
-HOTSPOT_TOOLS_OUTPUTDIR := $(BUILDTOOLS_OUTPUTDIR)/buildtools/hotspot_tools_classes
-
-################################################################################
-# To avoid reevaluating the compilation setup for the tools each time this file
-# is included, the actual compilation is handled by CompileToolsHotspot.gmk. The
-# following trick is used to be able to declare a dependency on the built tools.
-BUILD_TOOLS_HOTSPOT := $(call SetupJavaCompilationCompileTarget, \
-    BUILD_TOOLS_HOTSPOT, $(HOTSPOT_TOOLS_OUTPUTDIR))
-
 ################################################################################
 
-TOOL_JFR_GEN := $(JAVA_SMALL) -cp $(HOTSPOT_TOOLS_OUTPUTDIR) \
-    build.tools.jfr.GenerateJfrFiles
+ifeq ($(HOTSPOT_TARGET_CPU_ARCH), aarch64)
+  include $(TOPDIR)/make/ToolsHotspot.gmk
+
+  STRING_CASE_UCD_DIR := $(TOPDIR)/src/java.base/share/data/unicodedata
+  STRING_CASE_UNICODE_DATA := $(STRING_CASE_UCD_DIR)/UnicodeData.txt
+  STRING_CASE_SPECIAL_CASING := $(STRING_CASE_UCD_DIR)/SpecialCasing.txt
+  STRING_CASE_TEMPLATE := $(TOPDIR)/make/data/stringcasemappings/stringCaseMappings_aarch64.hpp.template
+  STRING_CASE_HEADER := $(JVM_VARIANT_OUTPUTDIR)/gensrc/stringCaseMappings_aarch64.hpp
+
+  $(eval $(call SetupExecute, generate_string_case_mappings, \
+      INFO := Generating AArch64 String case mapping tables, \
+      DEPS := $(STRING_CASE_UNICODE_DATA) $(STRING_CASE_SPECIAL_CASING) \
+          $(STRING_CASE_TEMPLATE) $(BUILD_TOOLS_HOTSPOT), \
+      OUTPUT_FILE := $(STRING_CASE_HEADER), \
+      COMMAND := $(TOOL_GENERATESTRINGCASEMAPPINGS) \
+          $(STRING_CASE_UNICODE_DATA) $(STRING_CASE_SPECIAL_CASING) \
+          $(STRING_CASE_TEMPLATE) $(STRING_CASE_HEADER), \
+  ))
+
+  TARGETS += $(generate_string_case_mappings_TARGET)
+endif
 
 ################################################################################
-
-TOOL_GENERATESTRINGCASEMAPPINGS := $(JAVA_SMALL) \
-    -cp $(HOTSPOT_TOOLS_OUTPUTDIR) \
-    build.tools.generatestringcasemappings.GenerateStringCaseMappings
-
-################################################################################
-
-endif # _TOOLS_HOTSPOT_GMK

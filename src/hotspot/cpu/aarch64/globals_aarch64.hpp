@@ -78,6 +78,17 @@ define_pd_global(intx, InitArrayShortSize, BytesPerLong);
 define_pd_global(intx, InlineSmallCode,          1000);
 #endif
 
+enum class StringCaseBackend : uint {
+  off       = 0,
+  sve       = 1,
+  sve2      = 2,
+  automatic = 3
+};
+
+constexpr uint string_case_backend_value(StringCaseBackend backend) {
+  return static_cast<uint>(backend);
+}
+
 #define ARCH_FLAGS(develop,                                             \
                    product,                                             \
                    notproduct,                                          \
@@ -112,8 +123,16 @@ define_pd_global(intx, InlineSmallCode,          1000);
           "Highest supported SVE instruction set version")              \
           range(0, 2)                                                   \
   product(bool, UseHisiOptimizations, false,                            \
-          "Use HiSilicon-specific optimizations controlled by their "    \
+          "Use HiSilicon-specific optimizations controlled by their "   \
           "individual flags")                                           \
+  product(uint, StringCaseIntrinsicBackend, 0, DIAGNOSTIC,              \
+          "String case intrinsic backend: 0=off, "                      \
+          "1=sve, 2=sve2, 3=auto")                                      \
+          range(0, 3)                                                   \
+  product(int, StringCaseIntrinsicMinLength, 8, DIAGNOSTIC,             \
+          "Minimum character count for String case intrinsic "          \
+          "stub calls")                                                 \
+          range(0, max_jint)                                            \
   product(bool, UseSVEHashCodeIntrinsic, false,                         \
           "Use SVE2 instructions in the vectorized hashcode intrinsic") \
   product(bool, UseStreamPrefetchForArrayCopy, false,                   \

@@ -28,6 +28,7 @@
 #include "asm/macroAssembler.inline.hpp"
 #include "asm/register.hpp"
 #include "atomic_aarch64.hpp"
+#include "stringCaseMappings_aarch64.hpp"
 #include "compiler/oopMap.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/barrierSetAssembler.hpp"
@@ -7540,6 +7541,597 @@ class StubGenerator: public StubCodeGenerator {
     StubRoutines::aarch64::_string_indexof_linear_ul = generate_string_indexof_linear(true, false);
   }
 
+  // Entry:
+  //   r0 = source byte address at first character
+  //   r1 = destination byte address at first character
+  //   r2 = first character index in the original String
+  //   r3 = number of characters to process
+  //
+  // Return:
+  //   Latin1 success: original String length
+  //   Latin1 fallback: first character requiring expansion or a non-Latin1 result
+  //   UTF16 success: non-negative coder marker; values > 0xff force UTF16
+  //   UTF16 fallback: -(first character requiring special handling + 1)
+  // Packed bytes are listed low byte first in the comments below.
+  // 40 5b 5c 5d 5e 5f d7 df: values excluded from the lowercase delta.
+  static constexpr uint64_t latin1_lower_sve2_non_case_bytes =
+      0xdfd75f5e5d5c5b40ULL;
+  // 60 7b 7c 7d 7e 7f f7 ff: values excluded from the uppercase delta.
+  static constexpr uint64_t latin1_upper_sve2_non_case_bytes =
+      0xfff77f7e7d7c7b60ULL;
+  // b5 df ff b5: values that require the Latin1 uppercase fallback.
+  static constexpr uint64_t latin1_upper_sve2_fallback_bytes = 0xb5ffdfb5ULL;
+  // A bit above the Latin1 range tells StringUTF16 to retain UTF16 storage.
+  static constexpr uint32_t string_case_wide_result_marker = 1U << 8;
+
+  static_assert(string_case_identity_sentinel == 0,
+                "CBZW requires a zero String case identity sentinel");
+
+  void emit_string_case_sve_lookup(FloatRegister codepoints,
+                                   FloatRegister pages,
+                                   FloatRegister indexes,
+                                   FloatRegister entries,
+                                   PRegister active,
+                                   PRegister mapped,
+                                   Register page_index,
+                                   Register map) {
+    __ sve_lsr(pages, Assembler::S, codepoints, string_case_page_shift);
+    __ sve_ld1b_gather(indexes, active, page_index, pages);
+    __ sve_lsl(indexes, Assembler::S, indexes, string_case_page_shift);
+    __ sve_orr(pages, codepoints, codepoints);
+    __ sve_and(pages, Assembler::S, string_case_page_mask);
+    __ sve_orr(indexes, indexes, pages);
+    __ sve_ld1h_gather(entries, active, map, indexes);
+
+    __ sve_cmp(Assembler::NE, mapped, Assembler::S, active, entries,
+               string_case_identity_sentinel);
+    __ sve_sel(entries, Assembler::S, mapped, entries, codepoints);
+  }
+
+#ifdef ASSERT
+  void assert_string_case_vector_scratch(FloatRegSet scratch) {
+    const FloatRegSet callee_saved = FloatRegSet::range(v8, v15);
+    assert((scratch.bits() & callee_saved.bits()) == 0,
+           "string case scratch vector registers must be caller-saved");
+  }
+#endif
+
+  void emit_string_case_latin1_lower_sve(Label& done) {
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister ext_lower_bound = v2;
+    FloatRegister ext_upper_bound = v3;
+    FloatRegister excluded_value = v4;
+    PRegister active = p0;
+    PRegister range = p1;
+    PRegister upper = p2;
+    PRegister ext_range = p3;
+    PRegister ext_upper = p4;
+    PRegister not_excluded = p5;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, ext_lower_bound, ext_upper_bound) +
+        excluded_value);
+#endif
+
+    Label vector_loop, latin1_setup, latin1_vector_loop, latin1_vector_body;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 0x7f);
+      __ br(Assembler::NE, latin1_setup);
+
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'A' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'Z');
+      __ sve_add(raw, Assembler::B, upper, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+
+    __ bind(latin1_setup);
+      __ sve_dup(ext_lower_bound, Assembler::B, -65);
+      __ sve_dup(ext_upper_bound, Assembler::B, -34);
+      __ sve_dup(excluded_value, Assembler::B, -41);
+      __ b(latin1_vector_body);
+
+    __ bind(latin1_vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+
+    __ bind(latin1_vector_body);
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'A' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'Z');
+      __ sve_cmp(Assembler::HI, ext_range, Assembler::B, active, raw,
+                 ext_lower_bound);
+      __ sve_cmp(Assembler::HS, ext_upper, Assembler::B, ext_range,
+                 ext_upper_bound, raw);
+      __ sve_cmp(Assembler::NE, not_excluded, Assembler::B, ext_upper,
+                 raw, excluded_value);
+      __ sve_orr(range, active, upper, not_excluded);
+      __ sve_add(raw, Assembler::B, range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(latin1_vector_loop);
+  }
+
+  void emit_string_case_latin1_upper_sve(Label& scalar_loop, Label& done) {
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister ext_lower_bound = v2;
+    FloatRegister ext_upper_bound = v3;
+    FloatRegister excluded_value = v4;
+    FloatRegister special_value = v5;
+    PRegister active = p0;
+    PRegister range = p1;
+    PRegister upper = p2;
+    PRegister ext_range = p3;
+    PRegister not_excluded = p5;
+    PRegister special = p6;
+    PRegister special_tmp = p4;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, ext_lower_bound, ext_upper_bound) +
+        excluded_value + special_value);
+    assert(special_tmp != ptrue,
+           "string case scratch predicate register must not alias ptrue");
+#endif
+
+    Label vector_loop, latin1_setup, latin1_vector_loop, latin1_vector_body;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 0x7f);
+      __ br(Assembler::NE, latin1_setup);
+
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'a' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'z');
+      __ sve_sub(raw, Assembler::B, upper, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+
+    __ bind(latin1_setup);
+      __ sve_dup(ext_lower_bound, Assembler::B, -33);
+      __ sve_dup(ext_upper_bound, Assembler::B, -2);
+      __ sve_dup(excluded_value, Assembler::B, -9);
+      __ sve_dup(special_value, Assembler::B, -75);
+      __ b(latin1_vector_body);
+
+    __ bind(latin1_vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+
+    __ bind(latin1_vector_body);
+      __ sve_cmp(Assembler::EQ, special, Assembler::B, active, raw, special_value);
+      __ sve_cmp(Assembler::EQ, special_tmp, Assembler::B, active, raw, ext_lower_bound);
+      __ sve_orr(special, active, special, special_tmp);
+      __ sve_cmp(Assembler::HI, special_tmp, Assembler::B, active, raw, ext_upper_bound);
+      __ sve_orrs(special, active, special, special_tmp);
+      __ br(Assembler::NE, scalar_loop);
+
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'a' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'z');
+      __ sve_cmp(Assembler::HI, ext_range, Assembler::B, active, raw,
+                 ext_lower_bound);
+      __ sve_cmp(Assembler::NE, not_excluded, Assembler::B, ext_range,
+                 raw, excluded_value);
+      __ sve_orr(range, active, upper, not_excluded);
+      __ sve_sub(raw, Assembler::B, range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(latin1_vector_loop);
+  }
+
+  void emit_string_case_latin1_lower_sve2(Label& done) {
+    assert(UseSVE >= 2 && VM_Version::supports_svebitperm(),
+           "SVE2 string case backend requires SVE BitPerm");
+
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+    Register tmp = rscratch1;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister class_mask = v2;
+    FloatRegister class_bits = v3;
+    FloatRegister exceptions = v4;
+    PRegister active = p0;
+    PRegister broad_range = p1;
+    PRegister case_range = p2;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, class_mask, class_bits) +
+        exceptions);
+#endif
+
+    Label vector_loop;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+    __ sve_dup(class_mask, Assembler::B, 0x60);
+    __ mov(tmp, latin1_lower_sve2_non_case_bytes);
+    __ sve_dup(exceptions, Assembler::D, tmp);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_bext(class_bits, Assembler::B, raw, class_mask);
+      __ sve_cmp(Assembler::EQ, broad_range, Assembler::B, active,
+                 class_bits, 2);
+      __ sve_nmatch(case_range, Assembler::B, broad_range, raw, exceptions);
+      __ sve_uqadd(raw, Assembler::B, case_range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+  }
+
+  void emit_string_case_latin1_upper_sve2(Label& scalar_loop, Label& done) {
+    assert(UseSVE >= 2 && VM_Version::supports_svebitperm(),
+           "SVE2 string case backend requires SVE BitPerm");
+
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+    Register tmp = rscratch1;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister class_mask = v2;
+    FloatRegister class_bits = v3;
+    FloatRegister exceptions = v4;
+    FloatRegister special_values = v5;
+    PRegister active = p0;
+    PRegister broad_range = p1;
+    PRegister case_range = p2;
+    PRegister special = p3;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, class_mask, class_bits) +
+        exceptions + special_values);
+#endif
+
+    Label vector_loop;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+    __ sve_dup(class_mask, Assembler::B, 0x60);
+    __ mov(tmp, latin1_upper_sve2_non_case_bytes);
+    __ sve_dup(exceptions, Assembler::D, tmp);
+    __ mov(tmp, latin1_upper_sve2_fallback_bytes);
+    __ sve_dup(special_values, Assembler::S, tmp);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_match(special, Assembler::B, active, raw, special_values);
+      __ br(Assembler::NE, scalar_loop);
+      __ sve_bext(class_bits, Assembler::B, raw, class_mask);
+      __ sve_cmp(Assembler::EQ, broad_range, Assembler::B, active,
+                 class_bits, 3);
+      __ sve_nmatch(case_range, Assembler::B, broad_range, raw, exceptions);
+      __ sve_uqsub(raw, Assembler::B, case_range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+  }
+
+  void emit_string_case_latin1_lower(StringCaseBackend backend, Label& done) {
+    if (backend == StringCaseBackend::sve2) {
+      emit_string_case_latin1_lower_sve2(done);
+    } else {
+      assert(backend == StringCaseBackend::sve, "unexpected String case backend");
+      emit_string_case_latin1_lower_sve(done);
+    }
+  }
+
+  void emit_string_case_latin1_upper(StringCaseBackend backend,
+                                      Label& scalar_loop, Label& done) {
+    if (backend == StringCaseBackend::sve2) {
+      emit_string_case_latin1_upper_sve2(scalar_loop, done);
+    } else {
+      assert(backend == StringCaseBackend::sve, "unexpected String case backend");
+      emit_string_case_latin1_upper_sve(scalar_loop, done);
+    }
+  }
+
+  void emit_string_case_utf16_sve(const uint8_t* case_page_index,
+                                   const uint16_t* case_map,
+                                   Label& scalar_loop, Label& done) {
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+    Register tmp = rscratch1;
+    Register vec_len = r14;
+    Register result_bits = r11;
+    Register page_index = r4;
+    Register map = r5;
+
+    FloatRegister raw = v0;
+    FloatRegister codepoints_lo = v1;
+    FloatRegister codepoints_hi = v2;
+    FloatRegister pages_lo = v3;
+    FloatRegister pages_hi = v4;
+    FloatRegister indexes_lo = v5;
+    FloatRegister indexes_hi = v6;
+    FloatRegister entries_lo = v7;
+    FloatRegister entries_hi = v16;
+    FloatRegister fallback_value = v17;
+    PRegister active = p0;
+    PRegister active_lo = p1;
+    PRegister active_hi = p2;
+    PRegister fallback = p3;
+    PRegister mapped = p4;
+    PRegister wide = p5;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, codepoints_lo, codepoints_hi, pages_lo) +
+        pages_hi + indexes_lo + indexes_hi + entries_lo + entries_hi +
+        fallback_value);
+#endif
+
+    Label vector_loop, narrow_result;
+
+    __ mov(page_index, reinterpret_cast<uint64_t>(case_page_index));
+    __ mov(map, reinterpret_cast<uint64_t>(case_map));
+    __ movw(tmp, string_case_fallback_sentinel);
+    __ sve_dup(fallback_value, Assembler::H, tmp);
+    __ sve_cnth(vec_len);
+
+    __ bind(vector_loop);
+      __ cmp(index, count);
+      __ br(Assembler::GE, done);
+      __ sve_whilelt(active, Assembler::H, index, count);
+      __ sve_ld1h(raw, Assembler::H, active,
+                  Address(src, index, Address::lsl(1)));
+      __ sve_uunpklo(codepoints_lo, Assembler::S, raw);
+      __ sve_uunpkhi(codepoints_hi, Assembler::S, raw);
+      __ sve_punpklo(active_lo, active);
+      __ sve_punpkhi(active_hi, active);
+
+      emit_string_case_sve_lookup(
+          codepoints_lo, pages_lo, indexes_lo, entries_lo,
+          active_lo, mapped, page_index, map);
+      emit_string_case_sve_lookup(
+          codepoints_hi, pages_hi, indexes_hi, entries_hi,
+          active_hi, mapped, page_index, map);
+
+      __ sve_uzp1(raw, Assembler::H, entries_lo, entries_hi);
+      __ sve_cmp(Assembler::EQ, fallback, Assembler::H, active,
+                 raw, fallback_value);
+      __ br(Assembler::NE, scalar_loop);
+      __ sve_lsr(pages_lo, Assembler::H, raw, string_case_page_shift);
+      __ sve_cmp(Assembler::NE, wide, Assembler::H, active, pages_lo, 0);
+      __ br(Assembler::EQ, narrow_result);
+      __ movw(result_bits, string_case_wide_result_marker);
+      __ bind(narrow_result);
+
+      __ sve_st1h(raw, Assembler::H, active,
+                  Address(dst, index, Address::lsl(1)));
+      __ add(index, index, vec_len);
+      __ b(vector_loop);
+  }
+
+  address generate_string_case_convert(bool is_latin1, bool to_lower,
+                                       StringCaseBackend backend,
+                                       const char* name) {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", name);
+    address entry = __ pc();
+
+    Register src = r0;
+    Register dst = r1;
+    Register first = r2;
+    Register count = r3;
+    Register index = r9;
+    Register ch = r10;
+    Register tmp = rscratch1;
+    Register vec_len = r14;
+
+    Register result_bits = r11;
+    Register page_index = r4;
+    Register map = r5;
+    Register map_entry = r6;
+    Register page = r7;
+
+    const uint8_t* const case_page_index = to_lower
+        ? string_case_lower_page_index : string_case_upper_page_index;
+    const uint16_t* const case_map = to_lower
+        ? string_case_lower_map[0] : string_case_upper_map[0];
+    Label SCALAR_LOOP, SCALAR_BODY, STORE, NEXT, DONE, FALLBACK;
+
+    __ movw(first, first);
+    __ movw(count, count);
+    __ mov(index, zr);
+    if (!is_latin1) {
+      __ mov(result_bits, zr);
+    }
+
+#ifdef ASSERT
+    if (StringCaseIntrinsicMinLength > 0) {
+      Label min_length_ok;
+      __ mov(tmp, (uint64_t)StringCaseIntrinsicMinLength);
+      __ cmp(count, tmp);
+      __ br(Assembler::HS, min_length_ok);
+      __ stop("String case intrinsic called below minimum length");
+      __ bind(min_length_ok);
+    }
+#endif
+
+    assert(backend == StringCaseBackend::sve || backend == StringCaseBackend::sve2,
+           "unexpected string case backend");
+    if (is_latin1) {
+      if (to_lower) {
+        emit_string_case_latin1_lower(backend, DONE);
+      } else {
+        emit_string_case_latin1_upper(backend, SCALAR_LOOP, DONE);
+      }
+    } else {
+      emit_string_case_utf16_sve(case_page_index, case_map, SCALAR_LOOP, DONE);
+    }
+
+    __ bind(SCALAR_LOOP);
+      if (!is_latin1) {
+        __ mov(page_index, reinterpret_cast<uint64_t>(case_page_index));
+        __ mov(map, reinterpret_cast<uint64_t>(case_map));
+        __ movw(vec_len, string_case_fallback_sentinel);
+      }
+
+    __ bind(SCALAR_BODY);
+      __ cmp(index, count);
+      __ br(Assembler::GE, DONE);
+
+      if (is_latin1) {
+        __ ldrb(ch, Address(src, index));
+      } else {
+        __ ldrh(ch, Address(src, index, Address::lsl(1)));
+      }
+      if (is_latin1) {
+        Label CHECK_EXTENDED, APPLY_CASE;
+        if (!to_lower) {
+          __ cmp(ch, u1(0xb5));
+          __ br(Assembler::EQ, FALLBACK);
+          __ cmp(ch, u1(0xdf));
+          __ br(Assembler::EQ, FALLBACK);
+          __ cmp(ch, u1(0xff));
+          __ br(Assembler::EQ, FALLBACK);
+        }
+
+        if (to_lower) {
+          __ orrw(tmp, ch, 0x20);
+        } else {
+          __ andw(tmp, ch, ~0x20u);
+        }
+        __ cmp(tmp, u1(to_lower ? 'a' : 'A'));
+        __ br(Assembler::LO, CHECK_EXTENDED);
+        __ cmp(tmp, u1(to_lower ? 'z' : 'Z'));
+        __ br(Assembler::LS, APPLY_CASE);
+
+        __ bind(CHECK_EXTENDED);
+        __ cmp(tmp, u1(to_lower ? 0xe0 : 0xc0));
+        __ br(Assembler::LO, STORE);
+        __ cmp(tmp, u1(to_lower ? 0xfe : 0xde));
+        __ br(Assembler::HI, STORE);
+        __ cmp(tmp, u1(to_lower ? 0xf7 : 0xd7));
+        __ br(Assembler::EQ, STORE);
+
+        __ bind(APPLY_CASE);
+        __ movw(ch, tmp);
+      } else {
+        Label KEEP_ORIGINAL;
+        __ lsrw(page, ch, string_case_page_shift);
+        __ ldrb(page, Address(page_index, page, Address::lsl(0)));
+        __ andw(tmp, ch, string_case_page_mask);
+        __ addw(tmp, tmp, page, Assembler::LSL, string_case_page_shift);
+        __ ldrh(map_entry, Address(map, tmp, Address::lsl(1)));
+        __ cmpw(map_entry, vec_len);
+        __ br(Assembler::EQ, FALLBACK);
+        __ cbzw(map_entry, KEEP_ORIGINAL);
+        __ movw(ch, map_entry);
+        __ bind(KEEP_ORIGINAL);
+        __ orrw(result_bits, result_bits, ch);
+      }
+
+    __ bind(STORE);
+      if (is_latin1) {
+        __ strb(ch, Address(dst, index));
+      } else {
+        __ strh(ch, Address(dst, index, Address::lsl(1)));
+      }
+
+    __ bind(NEXT);
+      __ add(index, index, 1);
+      if (is_latin1) {
+        __ b(SCALAR_LOOP);
+      } else {
+        __ b(SCALAR_BODY);
+      }
+
+    __ bind(FALLBACK);
+      __ add(tmp, first, index);
+      if (is_latin1) {
+        __ mov(r0, tmp);
+      } else {
+        __ add(tmp, tmp, 1);
+        __ neg(r0, tmp);
+      }
+      __ ret(lr);
+
+    __ bind(DONE);
+      if (is_latin1) {
+        __ add(r0, first, count);
+      } else {
+        __ movw(r0, result_bits);
+      }
+      __ ret(lr);
+
+    return entry;
+  }
+
+  void generate_string_case_stubs() {
+    const StringCaseBackend backend =
+        static_cast<StringCaseBackend>(StringCaseIntrinsicBackend);
+    if (backend == StringCaseBackend::off) {
+      return;
+    }
+
+    assert(backend == StringCaseBackend::sve || backend == StringCaseBackend::sve2,
+           "string case backend must be resolved before stub generation");
+    if (backend == StringCaseBackend::sve2) {
+      assert(UseSVE >= 2 && VM_Version::supports_svebitperm(),
+             "SVE2 string case backend requires SVE BitPerm");
+    }
+
+    StubRoutines::_string_case_intrinsic_min_length =
+        StringCaseIntrinsicMinLength;
+    StubRoutines::_string_case_latin1_lower =
+        generate_string_case_convert(
+            true, true, backend, "string_case_latin1_lower");
+    StubRoutines::_string_case_latin1_upper =
+        generate_string_case_convert(
+            true, false, backend, "string_case_latin1_upper");
+    StubRoutines::_string_case_utf16_lower =
+        generate_string_case_convert(
+            false, true, backend, "string_case_utf16_lower");
+    StubRoutines::_string_case_utf16_upper =
+        generate_string_case_convert(
+            false, false, backend, "string_case_utf16_upper");
+  }
+
   void inflate_and_store_2_fp_registers(bool generatePrfm,
       FloatRegister src1, FloatRegister src2) {
     Register dst = r1;
@@ -9931,6 +10523,8 @@ class StubGenerator: public StubCodeGenerator {
     generate_compare_long_strings();
 
     generate_string_indexof_stubs();
+
+    generate_string_case_stubs();
 
 #ifdef COMPILER2
     if (UseMultiplyToLenIntrinsic) {

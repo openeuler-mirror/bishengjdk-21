@@ -1198,6 +1198,7 @@ void ConnectionGraph::process_call_arguments(CallNode *call) {
                   strcmp(call->as_CallLeaf()->_name, "bigIntegerRightShiftWorker") == 0 ||
                   strcmp(call->as_CallLeaf()->_name, "bigIntegerLeftShiftWorker") == 0 ||
                   strcmp(call->as_CallLeaf()->_name, "vectorizedMismatch") == 0 ||
+                  strcmp(call->as_CallLeaf()->_name, "stringCaseConvert") == 0 ||
                   strcmp(call->as_CallLeaf()->_name, "get_class_id_intrinsic") == 0)
                  ))) {
             call->dump();

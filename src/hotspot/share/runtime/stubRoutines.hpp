@@ -236,6 +236,11 @@ class StubRoutines: AllStatic {
   static address _montgomerySquare;
   static address _bigIntegerRightShiftWorker;
   static address _bigIntegerLeftShiftWorker;
+  static address _string_case_latin1_lower;
+  static address _string_case_latin1_upper;
+  static address _string_case_utf16_lower;
+  static address _string_case_utf16_upper;
+  static int _string_case_intrinsic_min_length;
 
   static address _vectorizedMismatch;
 
@@ -423,6 +428,11 @@ class StubRoutines: AllStatic {
   static address montgomerySquare()    { return _montgomerySquare; }
   static address bigIntegerRightShift() { return _bigIntegerRightShiftWorker; }
   static address bigIntegerLeftShift()  { return _bigIntegerLeftShiftWorker; }
+  static address string_case_latin1_lower() { return _string_case_latin1_lower; }
+  static address string_case_latin1_upper() { return _string_case_latin1_upper; }
+  static address string_case_utf16_lower()  { return _string_case_utf16_lower; }
+  static address string_case_utf16_upper()  { return _string_case_utf16_upper; }
+  static int string_case_intrinsic_min_length() { return _string_case_intrinsic_min_length; }
   static address galoisCounterMode_AESCrypt()   { return _galoisCounterMode_AESCrypt; }
 
   static address vectorizedMismatch()  { return _vectorizedMismatch; }

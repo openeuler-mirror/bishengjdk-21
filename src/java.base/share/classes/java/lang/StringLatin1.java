@@ -440,7 +440,11 @@ final class StringLatin1 {
         byte[] result = new byte[len];
         System.arraycopy(value, 0, result, 0, first);  // Just copy the first few
                                                        // lowerCase characters.
-        for (int i = first; i < len; i++) {
+        int processed = first;
+        if (String.STRING_CASE_INTRINSICS) {
+            processed = toLowerCaseSimple(value, result, first, len);
+        }
+        for (int i = processed; i < len; i++) {
             int cp = value[i] & 0xff;
             cp = CharacterDataLatin1.instance.toLowerCase(cp);
             if (!canEncode(cp)) {                      // not a latin1 character
@@ -449,6 +453,18 @@ final class StringLatin1 {
             result[i] = (byte)cp;
         }
         return new String(result, LATIN1);
+    }
+
+    @IntrinsicCandidate
+    private static int toLowerCaseSimple(byte[] value, byte[] result, int first, int len) {
+        for (int i = first; i < len; i++) {
+            int cp = CharacterDataLatin1.instance.toLowerCase(value[i] & 0xff);
+            if (!canEncode(cp)) {
+                return i;
+            }
+            result[i] = (byte)cp;
+        }
+        return len;
     }
 
     private static String toLowerCaseEx(String str, byte[] value,
@@ -515,15 +531,30 @@ final class StringLatin1 {
         byte[] result = new byte[len];
         System.arraycopy(value, 0, result, 0, first);  // Just copy the first few
                                                        // upperCase characters.
-        for (int i = first; i < len; i++) {
-            int cp = value[i] & 0xff;
-            cp = CharacterDataLatin1.instance.toUpperCaseEx(cp);
+        int processed = first;
+        if (String.STRING_CASE_INTRINSICS) {
+            processed = toUpperCaseSimple(value, result, first, len);
+        }
+        for (int i = processed; i < len; i++) {
+            int cp = CharacterDataLatin1.instance.toUpperCaseEx(value[i] & 0xff);
             if (!canEncode(cp)) {                      // not a latin1 character
                 return toUpperCaseEx(str, value, first, locale, false);
             }
             result[i] = (byte)cp;
         }
         return new String(result, LATIN1);
+    }
+
+    @IntrinsicCandidate
+    private static int toUpperCaseSimple(byte[] value, byte[] result, int first, int len) {
+        for (int i = first; i < len; i++) {
+            int cp = CharacterDataLatin1.instance.toUpperCaseEx(value[i] & 0xff);
+            if (!canEncode(cp)) {
+                return i;
+            }
+            result[i] = (byte)cp;
+        }
+        return len;
     }
 
     private static String toUpperCaseEx(String str, byte[] value,

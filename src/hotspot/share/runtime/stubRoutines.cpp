@@ -156,6 +156,11 @@ address StubRoutines::_montgomeryMultiply = nullptr;
 address StubRoutines::_montgomerySquare = nullptr;
 address StubRoutines::_bigIntegerRightShiftWorker = nullptr;
 address StubRoutines::_bigIntegerLeftShiftWorker = nullptr;
+address StubRoutines::_string_case_latin1_lower = nullptr;
+address StubRoutines::_string_case_latin1_upper = nullptr;
+address StubRoutines::_string_case_utf16_lower = nullptr;
+address StubRoutines::_string_case_utf16_upper = nullptr;
+int StubRoutines::_string_case_intrinsic_min_length = 0;
 
 address StubRoutines::_vectorizedMismatch = nullptr;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,6 +50,8 @@ public class TestHisiIntrinsicOptimizationFlags {
             TestHisiIntrinsicOptimizationFlags.class.getName();
     private static final String PROBE_ARG = "probe";
     private static final String UMBRELLA_FLAG = "UseHisiOptimizations";
+    private static final String STRING_CASE_BACKEND_FLAG =
+            "StringCaseIntrinsicBackend";
     private static final String[] CONTROLLED_FLAGS = {
             "UseSIMDForStringEquals",
             "UseUTFConversionIntrinsics",
@@ -71,6 +73,7 @@ public class TestHisiIntrinsicOptimizationFlags {
             "-XX:+UseSVESmallBlockZeroing",
             "-XX:+UseLSE",
             "-XX:+UseLSEPrefetch",
+            "-XX:" + STRING_CASE_BACKEND_FLAG + "=3",
             "-XX:UseSVE=2"
     };
     private static final String[] ENABLE_DEPENDENCY_FLAGS = {
@@ -96,6 +99,7 @@ public class TestHisiIntrinsicOptimizationFlags {
         checkUmbrellaDefaultFlags(cpu);
         checkUmbrellaWithExplicitLSE(cpu);
         checkUmbrellaAndIndividualFlags(cpu);
+        checkUmbrellaRespectsExplicitStringCaseOff();
         checkStringEqualsArrayEqualsDependency();
         checkSVEHashCodeRequiresSVE2(cpu);
     }
@@ -122,6 +126,10 @@ public class TestHisiIntrinsicOptimizationFlags {
         for (String flag : CONTROLLED_FLAGS) {
             expectFlag(output, flag, false, "default flags");
         }
+        expectUintFlag(output, STRING_CASE_BACKEND_FLAG, 0,
+                "default flags: String case backend");
+        expectIntFlag(output, "StringCaseIntrinsicMinLength", 8,
+                "default flags: String case minimum length");
         expectFlag(output, "UseLSE", cpu.supportsFeature("lse"),
                 "default flags: LSE flag");
     }
@@ -141,6 +149,10 @@ public class TestHisiIntrinsicOptimizationFlags {
             for (String flag : CONTROLLED_FLAGS) {
                 expectDisabledWarning(output, flag, "individual flags only");
             }
+            expectUintFlag(output, STRING_CASE_BACKEND_FLAG, 0,
+                    "individual flags only: String case backend");
+            expectDisabledWarning(output, STRING_CASE_BACKEND_FLAG,
+                    "individual flags only");
         }
     }
 
@@ -184,6 +196,16 @@ public class TestHisiIntrinsicOptimizationFlags {
                 true /* individualFlagsSpecified */);
     }
 
+    private static void checkUmbrellaRespectsExplicitStringCaseOff()
+            throws Exception {
+        OutputAnalyzer output = runPrintFlags(
+                "-XX:+" + UMBRELLA_FLAG,
+                "-XX:" + STRING_CASE_BACKEND_FLAG + "=0",
+                "-XX:UseSVE=2");
+        expectUintFlag(output, STRING_CASE_BACKEND_FLAG, 0,
+                "umbrella with explicitly disabled String case backend");
+    }
+
     private static void checkEnabledFlags(CpuInfo cpu, OutputAnalyzer output,
                                           String context,
                                           boolean individualFlagsSpecified) {
@@ -219,6 +241,16 @@ public class TestHisiIntrinsicOptimizationFlags {
         expectFlag(output, "UseLSEPrefetch",
                 individualFlagsSpecified && cpu.isHiSilicon(),
                 context + ": LSE prefetch flag");
+        expectUintFlag(output, STRING_CASE_BACKEND_FLAG,
+                expectedStringCaseBackend(cpu, useSVE),
+                context + ": String case backend");
+    }
+
+    private static long expectedStringCaseBackend(CpuInfo cpu, long useSVE) {
+        if (!cpu.isHiSilicon() || useSVE < 1) {
+            return 0;
+        }
+        return useSVE >= 2 && cpu.supportsFeature("svebitperm") ? 2 : 1;
     }
 
     private static void checkStringEqualsArrayEqualsDependency() throws Exception {
@@ -300,6 +332,26 @@ public class TestHisiIntrinsicOptimizationFlags {
                     + " in PrintFlagsFinal output\n" + output.getOutput());
         }
         return Long.parseLong(value);
+    }
+
+    private static void expectUintFlag(OutputAnalyzer output, String name,
+                                       long expected, String context) {
+        long actual = uintFlagValue(output, name);
+        if (actual != expected) {
+            throw new AssertionError(name + " is " + actual + " but expected "
+                    + expected + " for " + context + "\n" + output.getOutput());
+        }
+    }
+
+    private static void expectIntFlag(OutputAnalyzer output, String name,
+                                      long expected, String context) {
+        String value = output.firstMatch(
+                "(?m)^\\s*int\\s+" + Pattern.quote(name)
+                        + "\\s+:?=\\s+(-?[0-9]+)\\b", 1);
+        if (value == null || Long.parseLong(value) != expected) {
+            throw new AssertionError(name + " is " + value + " but expected "
+                    + expected + " for " + context + "\n" + output.getOutput());
+        }
     }
 
     private static class CpuInfo {

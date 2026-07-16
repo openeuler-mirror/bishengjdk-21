@@ -263,25 +263,31 @@ void java_lang_String::set_compact_strings(bool value) {
 }
 
 #ifdef AARCH64
-class UTFConversionIntrinsicsFixup : public FieldClosure {
+class StringIntrinsicsFixup : public FieldClosure {
 private:
+  Symbol* _name;
   bool _value;
 
 public:
-  UTFConversionIntrinsicsFixup(bool value) : _value(value) {}
+  StringIntrinsicsFixup(Symbol* name, bool value) : _name(name), _value(value) {}
 
   void do_field(fieldDescriptor* fd) {
-    if (fd->name() == vmSymbols::utf_conversion_intrinsics_name()) {
+    if (fd->name() == _name) {
       oop mirror = fd->field_holder()->java_mirror();
       assert(fd->field_holder() == vmClasses::String_klass(), "Should be String");
-      assert(mirror != NULL, "String must have mirror already");
+      assert(mirror != nullptr, "String must have mirror already");
       mirror->bool_field_put(fd->offset(), _value);
     }
   }
 };
 
 void java_lang_String::set_utf_conversion_intrinsics(bool value) {
-  UTFConversionIntrinsicsFixup fix(value);
+  StringIntrinsicsFixup fix(vmSymbols::utf_conversion_intrinsics_name(), value);
+  vmClasses::String_klass()->do_local_static_fields(&fix);
+}
+
+void java_lang_String::set_string_case_intrinsics(bool value) {
+  StringIntrinsicsFixup fix(vmSymbols::string_case_intrinsics_name(), value);
   vmClasses::String_klass()->do_local_static_fields(&fix);
 }
 #endif // AARCH64

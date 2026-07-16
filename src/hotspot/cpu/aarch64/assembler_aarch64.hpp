@@ -3616,6 +3616,10 @@ public:
     f(op1, 31, 25), f(type, 24, 23), f(op2, 22, 21), rf(Zm, 16);                \
     f(op3, 15, 13), pgrf(Pg, 10), srf(Xn, 5), rf(Zt, 0);                        \
   }
+  // SVE gather load bytes into 32-bit elements (scalar plus 32-bit offsets)
+  INSN(sve_ld1b_gather,  0b1000010, 0b00, 0b00, 0b010);
+  // SVE gather load halfwords into 32-bit elements (scalar plus 32-bit scaled offsets)
+  INSN(sve_ld1h_gather,  0b1000010, 0b01, 0b01, 0b010);
   // SVE 32-bit gather load words (scalar plus 32-bit scaled offsets)
   INSN(sve_ld1w_gather,  0b1000010, 0b10, 0b01, 0b010);
   // SVE 64-bit gather load (scalar plus 32-bit unpacked scaled offsets)
@@ -4195,6 +4199,20 @@ public:
     f(0b00000101, 31, 24), f(T, 23, 22), f(0b100001100, 21, 13);
     pgrf(Pg, 10), rf(Zn, 5), rf(Zd, 0);
   }
+
+  // SVE2 cross-lane character match detect
+#define INSN(NAME, op)                                                                \
+  void NAME(PRegister Pd, SIMD_RegVariant T, PRegister Pg,                            \
+            FloatRegister Zn, FloatRegister Zm) {                                     \
+    starti;                                                                           \
+    assert(T == B || T == H, "invalid size");                                         \
+    f(0b01000101, 31, 24), f(T, 23, 22), f(0b1, 21), rf(Zm, 16);                      \
+    f(0b100, 15, 13), pgrf(Pg, 10), rf(Zn, 5), f(op, 4), prf(Pd, 0);                  \
+  }
+
+  INSN(sve_match,  0b0);
+  INSN(sve_nmatch, 0b1);
+#undef INSN
 
   // SVE2 Count matching elements in vector
   void sve_histcnt(FloatRegister Zd, SIMD_RegVariant T, PRegister Pg,

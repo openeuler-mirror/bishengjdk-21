@@ -40,6 +40,7 @@ include gensrc/GensrcJfr.gmk
 include gensrc/GensrcAdlc.gmk
 include gensrc/GensrcDtrace.gmk
 include gensrc/GensrcJvmti.gmk
+include gensrc/GensrcStringCaseMappings.gmk
 
 $(eval $(call IncludeCustomExtension, hotspot/gensrc/GenerateSources.gmk))
 

@@ -227,9 +227,15 @@ public final class String
      */
     private static final boolean UTF_CONVERSION_INTRINSICS;
 
+    /**
+     * True if String case conversion intrinsics are enabled in the VM.
+     */
+    static final boolean STRING_CASE_INTRINSICS;
+
     static {
         COMPACT_STRINGS = true;
         UTF_CONVERSION_INTRINSICS = false;
+        STRING_CASE_INTRINSICS = false;
     }
 
     /**
