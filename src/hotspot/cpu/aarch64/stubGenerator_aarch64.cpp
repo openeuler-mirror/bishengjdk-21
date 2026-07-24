@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, 2024, Red Hat Inc. All rights reserved.
+ * Copyright 2026 Arm Limited and/or its affiliates.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -4858,6 +4859,44 @@ class StubGenerator: public StubCodeGenerator {
     __ enter(); // required for proper stackwalking of RuntimeStub frame
     __ multiply_to_len(x, xlen, y, ylen, z, zlen, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7);
     __ leave(); // required for proper stackwalking of RuntimeStub frame
+    __ ret(lr);
+
+    return start;
+  }
+
+  /**
+   *  Arguments:
+   *
+   *  Input:
+   *    c_rarg0   - obja     address
+   *    c_rarg1   - objb     address
+   *    c_rarg2   - length   length
+   *    c_rarg3   - scale    log2_array_indxscale
+   *
+   *  Output:
+   *         r0   - int >= 0 mismatched index, < 0 bitwise complement of tail
+   */
+  address generate_vectorizedMismatch() {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", "vectorizedMismatch");
+    address start = __ pc();
+
+    const Register obja = c_rarg0;
+    const Register objb = c_rarg1;
+    const Register length = c_rarg2;
+    const Register scale = c_rarg3;
+    const Register tmp = r4;
+    const FloatRegister ztmp1 = z0;
+    const FloatRegister ztmp2 = z1;
+    const PRegister pgtmp = p0;
+    const PRegister ptmp = p8;
+    const Register result = r0;
+
+    BLOCK_COMMENT("Entry:");
+    __ enter();
+    __ vectorized_mismatch(obja, objb, length, scale, result, tmp,
+                           ztmp1, ztmp2, pgtmp, ptmp);
+    __ leave();
     __ ret(lr);
 
     return start;
@@ -10464,6 +10503,10 @@ class StubGenerator: public StubCodeGenerator {
 
     if (UsePoly1305Intrinsics) {
       StubRoutines::_poly1305_processBlocks = generate_poly1305_processBlocks();
+    }
+
+    if (UseVectorizedMismatchIntrinsic) {
+      StubRoutines::_vectorizedMismatch = generate_vectorizedMismatch();
     }
 
 #if defined (LINUX) && !defined (__ARM_FEATURE_ATOMICS)

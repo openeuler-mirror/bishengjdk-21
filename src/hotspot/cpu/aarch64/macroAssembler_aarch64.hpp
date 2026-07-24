@@ -1682,6 +1682,12 @@ public:
   // Code for java.lang.Thread::onSpinWait() intrinsic.
   void spin_wait();
 
+  // Code for ArraysSupport::vectorizedMismatch() intrinsic.
+  void vectorized_mismatch(Register obja, Register objb, Register length,
+                           Register log2_array_indxscale, Register result, Register tmp,
+                           FloatRegister vtmp1, FloatRegister vtmp2, PRegister pgtmp,
+                           PRegister ptmp);
+
   void lightweight_lock(Register obj, Register t1, Register t2, Register t3, Label& slow);
   void lightweight_unlock(Register obj, Register t1, Register t2, Register t3, Label& slow);
 
