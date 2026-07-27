@@ -232,10 +232,16 @@ public final class String
      */
     static final boolean STRING_CASE_INTRINSICS;
 
+    /**
+     * True if String.equalsIgnoreCase intrinsics are enabled in the VM.
+     */
+    static final boolean STRING_EQUALS_IGNORE_CASE_INTRINSICS;
+
     static {
         COMPACT_STRINGS = true;
         UTF_CONVERSION_INTRINSICS = false;
         STRING_CASE_INTRINSICS = false;
+        STRING_EQUALS_IGNORE_CASE_INTRINSICS = false;
     }
 
     /**

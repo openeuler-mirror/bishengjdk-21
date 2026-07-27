@@ -358,6 +358,8 @@ void Threads::initialize_java_lang_classes(JavaThread* main_thread, TRAPS) {
   java_lang_String::set_string_case_intrinsics(
       static_cast<StringCaseBackend>(StringCaseIntrinsicBackend) !=
       StringCaseBackend::off);
+  java_lang_String::set_string_equals_ignore_case_intrinsics(
+      UseStringEqualsIgnoreCaseIntrinsic);
 #endif // AARCH64
 
   // Initialize java_lang.System (needed before creating the thread)

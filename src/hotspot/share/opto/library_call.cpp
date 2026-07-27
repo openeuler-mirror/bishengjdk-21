@@ -308,6 +308,9 @@ bool LibraryCallKit::try_to_inline(int predicate) {
 
   case vmIntrinsics::_equalsL:                  return inline_string_equals(StrIntrinsicNode::LL);
   case vmIntrinsics::_equalsU:                  return inline_string_equals(StrIntrinsicNode::UU);
+  case vmIntrinsics::_equalsIgnoreCaseLL:       return inline_string_equals_ignore_case(StrIntrinsicNode::LL);
+  case vmIntrinsics::_equalsIgnoreCaseLU:       return inline_string_equals_ignore_case(StrIntrinsicNode::LU);
+  case vmIntrinsics::_equalsIgnoreCaseUU:       return inline_string_equals_ignore_case(StrIntrinsicNode::UU);
 
   case vmIntrinsics::_vectorizedHashCode:       return inline_vectorizedHashCode();
   case vmIntrinsics::_stringLatin1ToLowerCase:
@@ -793,6 +796,11 @@ Node* LibraryCallKit::try_to_predicate(int predicate) {
     return inline_digestBase_implCompressMB_predicate(predicate);
   case vmIntrinsics::_galoisCounterMode_AESCrypt:
     return inline_galoisCounterMode_AESCrypt_predicate();
+  case vmIntrinsics::_equalsIgnoreCaseLL:
+  case vmIntrinsics::_equalsIgnoreCaseLU:
+  case vmIntrinsics::_equalsIgnoreCaseUU:
+    assert(predicate == 0, "sanity");
+    return inline_string_equals_ignore_case_predicate();
 
   default:
     // If you get here, it may be that someone has added a new intrinsic
@@ -1030,6 +1038,74 @@ bool LibraryCallKit::inline_string_compareTo(StrIntrinsicNode::ArgEnc ae) {
   Node* result = make_string_method_node(Op_StrComp, arg1_start, arg1_cnt, arg2_start, arg2_cnt, ae);
   set_result(result);
   return true;
+}
+
+//-----------------------inline_string_equals_ignore_case--------------------
+bool LibraryCallKit::inline_string_equals_ignore_case(StrIntrinsicNode::ArgEnc ae) {
+  address stub_addr = nullptr;
+  const char* stub_name = nullptr;
+  int value_shift = 0;
+  int other_shift = 0;
+
+  switch (ae) {
+  case StrIntrinsicNode::LL:
+    stub_addr = StubRoutines::string_equals_ignore_case_ll();
+    stub_name = "stringEqualsIgnoreCaseLL";
+    break;
+  case StrIntrinsicNode::LU:
+    stub_addr = StubRoutines::string_equals_ignore_case_lu();
+    stub_name = "stringEqualsIgnoreCaseLU";
+    other_shift = 1;
+    break;
+  case StrIntrinsicNode::UU:
+    stub_addr = StubRoutines::string_equals_ignore_case_uu();
+    stub_name = "stringEqualsIgnoreCaseUU";
+    value_shift = 1;
+    other_shift = 1;
+    break;
+  default:
+    return false;
+  }
+
+  // Resolve every target-specific property before modifying the graph.  This
+  // keeps a failed intrinsic attempt side-effect free.
+  if (stub_addr == nullptr) {
+    return false;
+  }
+
+  assert(callee()->signature()->size() == 5,
+         "equalsIgnoreCase helper has 5 arguments");
+  Node* value   = must_be_not_null(argument(0), true);
+  Node* toffset = argument(1);
+  Node* other   = must_be_not_null(argument(2), true);
+  Node* ooffset = argument(3);
+  Node* len     = argument(4);
+
+  if (value_shift != 0) {
+    toffset = _gvn.transform(new LShiftINode(toffset, intcon(value_shift)));
+  }
+  if (other_shift != 0) {
+    ooffset = _gvn.transform(new LShiftINode(ooffset, intcon(other_shift)));
+  }
+
+  Node* value_start = array_element_address(value, toffset, T_BYTE);
+  Node* other_start = array_element_address(other, ooffset, T_BYTE);
+  Node* call = make_runtime_call(RC_LEAF,
+                                 OptoRuntime::string_equals_ignore_case_Type(),
+                                 stub_addr, stub_name, TypePtr::BOTTOM,
+                                 value_start, other_start, len);
+  set_result(_gvn.transform(new ProjNode(call, TypeFunc::Parms)));
+  return true;
+}
+
+//-------------------inline_string_equals_ignore_case_predicate--------------
+Node* LibraryCallKit::inline_string_equals_ignore_case_predicate() {
+  Node* len = argument(4);
+  Node* cmp = _gvn.transform(new CmpINode(
+      len, intcon(StubRoutines::string_equals_ignore_case_min_length())));
+  Node* below_threshold =
+      _gvn.transform(new BoolNode(cmp, BoolTest::lt));
+  return generate_guard(below_threshold, nullptr, PROB_MIN);
 }
 
 //------------------------------inline_string_equals------------------------

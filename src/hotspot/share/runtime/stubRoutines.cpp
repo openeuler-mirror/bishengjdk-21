@@ -161,6 +161,10 @@ address StubRoutines::_string_case_latin1_upper = nullptr;
 address StubRoutines::_string_case_utf16_lower = nullptr;
 address StubRoutines::_string_case_utf16_upper = nullptr;
 int StubRoutines::_string_case_intrinsic_min_length = 0;
+address StubRoutines::_string_equals_ignore_case_ll = nullptr;
+address StubRoutines::_string_equals_ignore_case_lu = nullptr;
+address StubRoutines::_string_equals_ignore_case_uu = nullptr;
+int StubRoutines::_string_equals_ignore_case_min_length = 0;
 
 address StubRoutines::_vectorizedMismatch = nullptr;
 

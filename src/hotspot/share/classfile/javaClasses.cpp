@@ -290,6 +290,12 @@ void java_lang_String::set_string_case_intrinsics(bool value) {
   StringIntrinsicsFixup fix(vmSymbols::string_case_intrinsics_name(), value);
   vmClasses::String_klass()->do_local_static_fields(&fix);
 }
+
+void java_lang_String::set_string_equals_ignore_case_intrinsics(bool value) {
+  StringIntrinsicsFixup enabled_fix(
+      vmSymbols::string_equals_ignore_case_intrinsics_name(), value);
+  vmClasses::String_klass()->do_local_static_fields(&enabled_fix);
+}
 #endif // AARCH64
 
 Handle java_lang_String::basic_create(int length, bool is_latin1, TRAPS) {

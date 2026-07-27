@@ -694,6 +694,10 @@ void VM_Version::initialize() {
         ENABLE_HISI_FLAG_BY_DEFAULT(UseSVEHashCodeIntrinsic);
       }
 
+      if (VM_Version::supports_sve()) {
+        ENABLE_HISI_FLAG_BY_DEFAULT(UseStringEqualsIgnoreCaseIntrinsic);
+      }
+
       if (is_950()) {
         ENABLE_HISI_FLAG_BY_DEFAULT(UseStreamPrefetchForArrayCopy);
         ENABLE_HISI_FLAG_BY_DEFAULT(UseSVESmallBlockZeroing);
@@ -722,6 +726,14 @@ void VM_Version::initialize() {
       FLAG_SET_DEFAULT(UseSVEHashCodeIntrinsic, false);
     }
 
+    if (UseStringEqualsIgnoreCaseIntrinsic && !VM_Version::supports_sve()) {
+      if (!FLAG_IS_DEFAULT(UseStringEqualsIgnoreCaseIntrinsic)) {
+        warning("UseStringEqualsIgnoreCaseIntrinsic specified, but requires "
+                "SVE. Disabling.");
+      }
+      FLAG_SET_DEFAULT(UseStringEqualsIgnoreCaseIntrinsic, false);
+    }
+
     if (StringCaseIntrinsicBackend == string_case_auto) {
       if (UseSVE >= 2 && VM_Version::supports_svebitperm()) {
         FLAG_SET_DEFAULT(StringCaseIntrinsicBackend, string_case_sve2);
@@ -748,6 +760,7 @@ void VM_Version::initialize() {
     DISABLE_HISI_FLAG(UseUTFConversionIntrinsics);
     DISABLE_HISI_FLAG(UseStlrForRelease);
     DISABLE_HISI_FLAG(UseSVEHashCodeIntrinsic);
+    DISABLE_HISI_FLAG(UseStringEqualsIgnoreCaseIntrinsic);
     DISABLE_HISI_FLAG(UseStreamPrefetchForArrayCopy);
     DISABLE_HISI_FLAG(UseSVESmallBlockZeroing);
     DISABLE_HISI_FLAG(UseLSEPrefetch);

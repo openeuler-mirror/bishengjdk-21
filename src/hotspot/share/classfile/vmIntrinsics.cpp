@@ -192,6 +192,9 @@ int vmIntrinsics::predicates_needed(vmIntrinsics::ID id) {
   case vmIntrinsics::_electronicCodeBook_decryptAESCrypt:
   case vmIntrinsics::_counterMode_AESCrypt:
   case vmIntrinsics::_galoisCounterMode_AESCrypt:
+  case vmIntrinsics::_equalsIgnoreCaseLL:
+  case vmIntrinsics::_equalsIgnoreCaseLU:
+  case vmIntrinsics::_equalsIgnoreCaseUU:
     return 1;
   case vmIntrinsics::_digestBase_implCompressMB:
     return 5;

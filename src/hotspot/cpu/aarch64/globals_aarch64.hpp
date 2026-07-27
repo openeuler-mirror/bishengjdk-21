@@ -133,6 +133,14 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
           "Minimum character count for String case intrinsic "          \
           "stub calls")                                                 \
           range(0, max_jint)                                            \
+  product(bool, UseStringEqualsIgnoreCaseIntrinsic, false,              \
+          DIAGNOSTIC,                                                   \
+          "Use the SVE String.equalsIgnoreCase intrinsic")              \
+  product(int, StringEqualsIgnoreCaseIntrinsicMinLength, 16,            \
+          DIAGNOSTIC,                                                   \
+          "Minimum number of code units for the "                       \
+          "String.equalsIgnoreCase intrinsic")                          \
+          range(0, max_jint)                                            \
   product(bool, UseSVEHashCodeIntrinsic, false,                         \
           "Use SVE2 instructions in the vectorized hashcode intrinsic") \
   product(bool, UseStreamPrefetchForArrayCopy, false,                   \

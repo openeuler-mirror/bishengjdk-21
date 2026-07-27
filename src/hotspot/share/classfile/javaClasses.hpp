@@ -104,6 +104,7 @@ class java_lang_String : AllStatic {
 #ifdef AARCH64
   static void set_utf_conversion_intrinsics(bool value);
   static void set_string_case_intrinsics(bool value);
+  static void set_string_equals_ignore_case_intrinsics(bool value);
 #endif // AARCH64
 
   static int value_offset() { CHECK_INIT(_value_offset); }

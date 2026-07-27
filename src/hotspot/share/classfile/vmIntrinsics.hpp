@@ -401,6 +401,14 @@ class methodHandle;
    do_name(     indexOfUL_name,                                  "indexOfLatin1")                                       \
    do_signature(indexOfI_signature,                              "([BI[BII)I")                                          \
    do_signature(indexOfChar_signature,                           "([BIII)I")                                            \
+  do_intrinsic(_equalsIgnoreCaseLL, java_lang_StringLatin1,                                                             \
+               regionMatchesCIResult_name, indexOfI_signature, F_S)                                                     \
+  do_intrinsic(_equalsIgnoreCaseLU, java_lang_StringLatin1,                                                             \
+               regionMatchesCI_UTF16Result_name, indexOfI_signature, F_S)                                               \
+  do_intrinsic(_equalsIgnoreCaseUU, java_lang_StringUTF16,                                                              \
+               regionMatchesCIResult_name, indexOfI_signature, F_S)                                                     \
+   do_name(     regionMatchesCIResult_name,                       "regionMatchesCIResult")                              \
+   do_name(     regionMatchesCI_UTF16Result_name,                 "regionMatchesCI_UTF16Result")                        \
   do_intrinsic(_equalsL,                  java_lang_StringLatin1,equals_name, equalsB_signature,                 F_S)   \
   do_intrinsic(_equalsU,                  java_lang_StringUTF16, equals_name, equalsB_signature,                 F_S)   \
                                                                                                                         \

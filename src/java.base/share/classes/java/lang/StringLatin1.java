@@ -41,6 +41,8 @@ import static java.lang.String.checkIndex;
 import static java.lang.String.checkOffset;
 
 final class StringLatin1 {
+    private static final int CI_MATCH = -1;
+    private static final int CI_MISMATCH = -2;
 
     public static char charAt(byte[] value, int index) {
         checkIndex(index, value.length);
@@ -384,6 +386,30 @@ final class StringLatin1 {
     // case insensitive
     public static boolean regionMatchesCI(byte[] value, int toffset,
                                           byte[] other, int ooffset, int len) {
+        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS) {
+            return regionMatchesCIScalar(value, toffset, other, ooffset, len);
+        }
+        int result = regionMatchesCIResult(value, toffset, other, ooffset, len);
+        if (result == CI_MATCH) {
+            return true;
+        }
+        if (result == CI_MISMATCH) {
+            return false;
+        }
+        assert result >= 0 && result <= len;
+        return regionMatchesCIScalar(value, toffset + result,
+                other, ooffset + result, len - result);
+    }
+
+    @IntrinsicCandidate
+    private static int regionMatchesCIResult(byte[] value, int toffset,
+                                             byte[] other, int ooffset, int len) {
+        return regionMatchesCIScalar(value, toffset, other, ooffset, len)
+                ? CI_MATCH : CI_MISMATCH;
+    }
+
+    private static boolean regionMatchesCIScalar(byte[] value, int toffset,
+                                                 byte[] other, int ooffset, int len) {
         int last = toffset + len;
         while (toffset < last) {
             byte b1 = value[toffset++];
@@ -398,6 +424,33 @@ final class StringLatin1 {
 
     public static boolean regionMatchesCI_UTF16(byte[] value, int toffset,
                                                 byte[] other, int ooffset, int len) {
+        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS) {
+            return regionMatchesCI_UTF16Scalar(value, toffset,
+                    other, ooffset, len);
+        }
+        int result = regionMatchesCI_UTF16Result(value, toffset, other, ooffset, len);
+        if (result == CI_MATCH) {
+            return true;
+        }
+        if (result == CI_MISMATCH) {
+            return false;
+        }
+        assert result >= 0 && result <= len;
+        return regionMatchesCI_UTF16Scalar(value, toffset + result,
+                other, ooffset + result, len - result);
+    }
+
+    @IntrinsicCandidate
+    private static int regionMatchesCI_UTF16Result(byte[] value, int toffset,
+                                                   byte[] other, int ooffset,
+                                                   int len) {
+        return regionMatchesCI_UTF16Scalar(value, toffset, other, ooffset, len)
+                ? CI_MATCH : CI_MISMATCH;
+    }
+
+    private static boolean regionMatchesCI_UTF16Scalar(byte[] value, int toffset,
+                                                       byte[] other, int ooffset,
+                                                       int len) {
         int last = toffset + len;
         while (toffset < last) {
             char c1 = (char)(value[toffset++] & 0xff);
