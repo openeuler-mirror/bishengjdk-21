@@ -103,6 +103,9 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
           "Use CRC32 instructions for CRC32 computation")               \
   product(bool, UseCryptoPmullForCRC32, false,                          \
           "Use Crypto PMULL instructions for CRC32 computation")        \
+  product(bool, UseStlrForRelease, false,                               \
+          "Emit stlr for setRelease/putXRelease/putOrdered* stores "    \
+          "and elide the leading dmb ish")                              \
   product(bool, UseSIMDForMemoryOps, false,                             \
           "Use SIMD instructions in generated memory move code")        \
   product(bool, UseSIMDForArrayEquals, true,                            \
@@ -287,8 +290,6 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
   product(ccstr, NUMABindPolicy, nullptr,                               \
           "Enable deterministic NUMA placement with combined Options,"  \
           "including prefix=<id> and div=<N>.")                         \
-  product(bool, UseStlrForRelease, false,                               \
-          "Use stlr instead of dmb ish + str for release stores")       \
   product(bool, UseUTFConversionIntrinsics, false,                      \
           "Use Intrinsics for conversion between UTF8 and UTF16")       \
   product(ccstr, AutoSharedArchivePath, nullptr,                        \
