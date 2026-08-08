@@ -1251,7 +1251,11 @@ void SystemDictionary::load_shared_class_misc(InstanceKlass* ik, ClassLoaderData
 #ifdef AARCH64
 
 static Handle bytecode_enhancement_protection_domain(Handle class_loader, const char* source, TRAPS) {
-  if (source == nullptr) {
+  // Bootstrap-loaded classes have no Java-level class loader or protection
+  // domain. In JDK 21, a non-null protection domain causes
+  // Dictionary::validate_protection_domain() to run, which requires a
+  // non-null class loader.
+  if (class_loader.is_null() || source == nullptr) {
     return Handle();
   }
 

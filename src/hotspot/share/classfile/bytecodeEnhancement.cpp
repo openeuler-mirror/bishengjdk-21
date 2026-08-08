@@ -15,11 +15,6 @@
  * You should have received a copy of the GNU General Public License version
  * 2 along with this work; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
- *
  */
 
 #ifdef AARCH64
@@ -728,7 +723,16 @@ void BytecodeEnhancement::initialize() {
   _owner_class_loaders = new (mtClass) BytecodeEnhancementOwnerTable();
   if (UsePrimitiveHashSet) {
     add_internal_class_replacement("java/util/HashSet", 0xf477dc75U);
-    add_internal_class_addition("java/util/HashSet$NumHashSet", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$PrimitiveHashSet", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$PrimitiveHashSet$1", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$LongHashSet", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$LongHashSet$LongIterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$LongHashSet$LongSpliterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$LongHashSet$LongArrayList", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$IntHashSet", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$IntHashSet$IntIterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$IntHashSet$IntSpliterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/HashSet$IntHashSet$IntArrayList", BuiltinLoader::BootLoader);
   }
   if (BytecodeEnhancementPaths != nullptr) {
     GrowableArray<ClassPathEntry*> path_entries;

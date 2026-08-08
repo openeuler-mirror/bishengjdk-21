@@ -15,11 +15,6 @@
  * You should have received a copy of the GNU General Public License version
  * 2 along with this work; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
- *
  */
 
 /*
@@ -39,45 +34,66 @@ import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
 
 public class PrimitiveHashSetTest {
-    private static final String NUM_HASH_SET_FIELD = "NumHashSet";
-    private static final String NUM_HASH_SET_CLASS = "java.util.HashSet$NumHashSet";
+    private static final String PRIMITIVE_HASH_SET_FIELD = "primitiveHashSet";
+    private static final String[] PRIMITIVE_HASH_SET_CLASSES = {
+            "java.util.HashSet$PrimitiveHashSet",
+            "java.util.HashSet$PrimitiveHashSet$1",
+            "java.util.HashSet$LongHashSet",
+            "java.util.HashSet$LongHashSet$LongIterator",
+            "java.util.HashSet$LongHashSet$LongSpliterator",
+            "java.util.HashSet$LongHashSet$LongArrayList",
+            "java.util.HashSet$IntHashSet",
+            "java.util.HashSet$IntHashSet$IntIterator",
+            "java.util.HashSet$IntHashSet$IntSpliterator",
+            "java.util.HashSet$IntHashSet$IntArrayList"
+    };
 
     public static void main(String[] args) throws Exception {
         if (args.length != 0) {
             boolean expected = Boolean.parseBoolean(args[0]);
             Field field = null;
             try {
-                field = HashSet.class.getDeclaredField(NUM_HASH_SET_FIELD);
+                field = HashSet.class.getDeclaredField(PRIMITIVE_HASH_SET_FIELD);
             } catch (NoSuchFieldException e) {
                 // Expected when the replacement is disabled.
             }
             boolean present = field != null;
             if (present != expected) {
-                throw new RuntimeException("HashSet NumHashSet field present=" + present
+                throw new RuntimeException("HashSet PrimitiveHashSet field present=" + present
                                            + ", expected=" + expected);
             }
-            Class<?> numHashSetClass = null;
-            try {
-                numHashSetClass = Class.forName(NUM_HASH_SET_CLASS, false, null);
-            } catch (ClassNotFoundException e) {
-                if (expected) {
-                    throw e;
+            Class<?> primitiveHashSetClass = null;
+            for (String className : PRIMITIVE_HASH_SET_CLASSES) {
+                Class<?> nestedClass = null;
+                try {
+                    nestedClass = Class.forName(className, false, null);
+                } catch (ClassNotFoundException e) {
+                    if (expected) {
+                        throw e;
+                    }
                 }
-            }
-            if ((numHashSetClass != null) != expected) {
-                throw new RuntimeException("HashSet.NumHashSet class present="
-                                           + (numHashSetClass != null) + ", expected=" + expected);
+                if ((nestedClass != null) != expected) {
+                    throw new RuntimeException(className + " present="
+                                               + (nestedClass != null) + ", expected=" + expected);
+                }
+                if (nestedClass != null) {
+                    if (nestedClass.getClassLoader() != null) {
+                        throw new RuntimeException(className + " must be defined by the boot loader");
+                    }
+                    if (className.equals(PRIMITIVE_HASH_SET_CLASSES[0])) {
+                        primitiveHashSetClass = nestedClass;
+                    }
+                }
             }
             if (expected) {
-                int modifiers = numHashSetClass.getModifiers();
-                if (!Modifier.isPrivate(modifiers) || !Modifier.isStatic(modifiers)) {
-                    throw new RuntimeException("HashSet.NumHashSet must be private static");
+                int modifiers = primitiveHashSetClass.getModifiers();
+                if (!Modifier.isPrivate(modifiers) || !Modifier.isStatic(modifiers)
+                        || !Modifier.isAbstract(modifiers)) {
+                    throw new RuntimeException("HashSet.PrimitiveHashSet must be private static abstract");
                 }
-                if (numHashSetClass.getClassLoader() != null) {
-                    throw new RuntimeException("HashSet.NumHashSet must be defined by the boot loader");
-                }
-                if (field.getType() != int.class) {
-                    throw new RuntimeException("NumHashSet field has unexpected type " + field.getType());
+                if (field.getType() != primitiveHashSetClass || !Modifier.isTransient(field.getModifiers())
+                        || Modifier.isPublic(field.getModifiers())) {
+                    throw new RuntimeException("PrimitiveHashSet field has unexpected type " + field.getType());
                 }
             }
             if (!Modifier.isPublic(HashSet.class.getModifiers())) {
@@ -102,13 +118,19 @@ public class PrimitiveHashSetTest {
     }
 
     private static void run(boolean expected, String... flags) throws Exception {
-        String[] args = new String[flags.length + 2];
-        System.arraycopy(flags, 0, args, 0, flags.length);
-        args[flags.length] = PrimitiveHashSetTest.class.getName();
-        args[flags.length + 1] = Boolean.toString(expected);
+        String[] args = new String[flags.length + 3];
+        args[0] = "-Xlog:class+load+enhancement=info";
+        System.arraycopy(flags, 0, args, 1, flags.length);
+        args[flags.length + 1] = PrimitiveHashSetTest.class.getName();
+        args[flags.length + 2] = Boolean.toString(expected);
         ProcessBuilder builder = ProcessTools.createLimitedTestJavaProcessBuilder(
                 args);
         OutputAnalyzer output = ProcessTools.executeProcess(builder);
         output.shouldHaveExitValue(0);
+        if (expected) {
+            output.shouldContain("Bytecode enhancement replacing class java/util/HashSet");
+        } else {
+            output.shouldNotContain("Bytecode enhancement replacing class java/util/HashSet");
+        }
     }
 }

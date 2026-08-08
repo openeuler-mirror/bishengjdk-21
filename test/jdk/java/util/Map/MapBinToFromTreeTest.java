@@ -35,6 +35,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
 
 /*
  * @test
@@ -90,7 +91,7 @@ public class MapBinToFromTreeTest {
             // collisions and other tests will verify more general functionality
             Collection<Integer> actual = m.keySet().stream().map(e -> e.value).collect(c);
             Collection<Integer> expected = IntStream.range(0, s).boxed().collect(c);
-            assertEquals(actual, expected, "Map.keySet()");
+            assertCollectionEquals(m, actual, expected, "Map.keySet()");
         });
     }
 
@@ -115,7 +116,7 @@ public class MapBinToFromTreeTest {
         remove(m, (i, s) -> {
             Collection<Integer> actual = m.keySet().stream().map(e -> e.value).collect(c);
             Collection<Integer> expected = IntStream.range(i + 1, SIZE).boxed().collect(c);
-            assertEquals(actual, expected, "Map.keySet()");
+            assertCollectionEquals(m, actual, expected, "Map.keySet()");
         });
     }
 
@@ -156,7 +157,7 @@ public class MapBinToFromTreeTest {
 
             Collection<Integer> actual = m.keySet().stream().map(e -> e.value).collect(c);
             Collection<Integer> expected = IntStream.rangeClosed(0, i).boxed().collect(c);
-            assertEquals(actual, expected, "Key set");
+            assertCollectionEquals(m, actual, expected, "Key set");
         }
     }
 
@@ -165,6 +166,16 @@ public class MapBinToFromTreeTest {
                                                                          ? Collectors.toList()
                                                                          : Collectors.toSet();
         return collector;
+    }
+
+    void assertCollectionEquals(Map<?, ?> m, Collection<Integer> actual,
+                                Collection<Integer> expected, String message) {
+        if (m instanceof LinkedHashMap) {
+            assertEquals(actual, expected, message);
+        } else {
+            assertEquals(actual.size(), expected.size(), message);
+            assertTrue(actual.containsAll(expected), message);
+        }
     }
 
     void put(int size, Map<HashCodeInteger, Integer> m, BiConsumer<Integer, Integer> c) {
