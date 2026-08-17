@@ -126,6 +126,9 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
   product(uint, UseSVE, 0,                                              \
           "Highest supported SVE instruction set version")              \
           range(0, 2)                                                   \
+  product(bool, PrintAArch64OptimizationHits, false, DIAGNOSTIC,        \
+          "Print the first entry into each selected AArch64 "           \
+          "optimization path; may perturb performance")                 \
   product(bool, UseHisiOptimizations, false,                            \
           "Use HiSilicon-specific optimizations controlled by their "   \
           "individual flags")                                           \
