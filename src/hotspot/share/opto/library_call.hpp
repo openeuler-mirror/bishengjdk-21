@@ -191,7 +191,10 @@ class LibraryCallKit : public GraphKit {
                           RegionNode* region, Node* phi, StrIntrinsicNode::ArgEnc ae);
   bool inline_string_indexOfChar(StrIntrinsicNode::ArgEnc ae);
   bool inline_string_equals(StrIntrinsicNode::ArgEnc ae);
+  bool inline_string_equals_ignore_case(StrIntrinsicNode::ArgEnc ae);
+  Node* inline_string_equals_ignore_case_predicate();
   bool inline_vectorizedHashCode();
+  bool inline_string_case_convert();
   bool inline_string_toBytesU();
   bool inline_string_getCharsU();
   bool inline_string_copy(bool compress);

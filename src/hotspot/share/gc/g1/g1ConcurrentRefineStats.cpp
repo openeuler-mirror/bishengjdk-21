@@ -24,14 +24,31 @@
 
 #include "precompiled.hpp"
 #include "gc/g1/g1ConcurrentRefineStats.hpp"
+#ifdef AARCH64
+#include "runtime/atomic.hpp"
+#include "runtime/timer.hpp"
+#endif /* AARCH64 */
 
 G1ConcurrentRefineStats::G1ConcurrentRefineStats() :
+#ifndef AARCH64
   _refinement_time(),
   _refined_cards(0),
   _precleaned_cards(0),
   _dirtied_cards(0)
+#else /* AARCH64 */
+  _sweep_duration(0),
+  _yield_during_sweep_duration(0),
+  _cards_scanned(0),
+  _cards_clean(0),
+  _cards_not_parsable(0),
+  _cards_already_refer_to_cset(0),
+  _cards_refer_to_cset(0),
+  _cards_no_cross_region(0),
+  _refine_duration(0)
+#endif /* AARCH64 */
 {}
 
+#ifndef AARCH64
 double G1ConcurrentRefineStats::refinement_rate_ms() const {
   // Report 0 when no time recorded because no refinement performed.
   double secs = refinement_time().seconds();
@@ -60,6 +77,19 @@ G1ConcurrentRefineStats::operator-=(const G1ConcurrentRefineStats& other) {
   _dirtied_cards = clipped_sub(_dirtied_cards, other._dirtied_cards);
   return *this;
 }
+#else /* AARCH64 */
+void G1ConcurrentRefineStats::add_atomic(G1ConcurrentRefineStats* other) {
+  Atomic::add(&_sweep_duration, other->_sweep_duration, memory_order_relaxed);
+  Atomic::add(&_yield_during_sweep_duration, other->_yield_during_sweep_duration, memory_order_relaxed);
+  Atomic::add(&_cards_scanned, other->_cards_scanned, memory_order_relaxed);
+  Atomic::add(&_cards_clean, other->_cards_clean, memory_order_relaxed);
+  Atomic::add(&_cards_not_parsable, other->_cards_not_parsable, memory_order_relaxed);
+  Atomic::add(&_cards_already_refer_to_cset, other->_cards_already_refer_to_cset, memory_order_relaxed);
+  Atomic::add(&_cards_refer_to_cset, other->_cards_refer_to_cset, memory_order_relaxed);
+  Atomic::add(&_cards_no_cross_region, other->_cards_no_cross_region, memory_order_relaxed);
+  Atomic::add(&_refine_duration, other->_refine_duration, memory_order_relaxed);
+}
+#endif /* AARCH64 */
 
 void G1ConcurrentRefineStats::reset() {
   *this = G1ConcurrentRefineStats();

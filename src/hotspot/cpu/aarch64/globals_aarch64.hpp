@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2000, 2023, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2015, 2019, Red Hat Inc. All rights reserved.
+ * Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -78,6 +79,17 @@ define_pd_global(intx, InitArrayShortSize, BytesPerLong);
 define_pd_global(intx, InlineSmallCode,          1000);
 #endif
 
+enum class StringCaseBackend : uint {
+  off       = 0,
+  sve       = 1,
+  sve2      = 2,
+  automatic = 3
+};
+
+constexpr uint string_case_backend_value(StringCaseBackend backend) {
+  return static_cast<uint>(backend);
+}
+
 #define ARCH_FLAGS(develop,                                             \
                    product,                                             \
                    notproduct,                                          \
@@ -92,10 +104,15 @@ define_pd_global(intx, InlineSmallCode,          1000);
           "Use CRC32 instructions for CRC32 computation")               \
   product(bool, UseCryptoPmullForCRC32, false,                          \
           "Use Crypto PMULL instructions for CRC32 computation")        \
+  product(bool, UseStlrForRelease, false,                               \
+          "Emit stlr for setRelease/putXRelease/putOrdered* stores "    \
+          "and elide the leading dmb ish")                              \
   product(bool, UseSIMDForMemoryOps, false,                             \
           "Use SIMD instructions in generated memory move code")        \
   product(bool, UseSIMDForArrayEquals, true,                            \
           "Use SIMD instructions in generated array equals code")       \
+  product(bool, UseSIMDForStringEquals, false,                          \
+          "Use SIMD array equals stub for long String equals")           \
   product(bool, UseSimpleArrayEquals, false,                            \
           "Use simplest and shortest implementation for array equals")  \
   product(bool, UseSIMDForBigIntegerShiftIntrinsics, true,              \
@@ -109,6 +126,64 @@ define_pd_global(intx, InlineSmallCode,          1000);
   product(uint, UseSVE, 0,                                              \
           "Highest supported SVE instruction set version")              \
           range(0, 2)                                                   \
+  product(bool, PrintAArch64OptimizationHits, false, DIAGNOSTIC,        \
+          "Print the first entry into each selected AArch64 "           \
+          "optimization path; may perturb performance")                 \
+  product(bool, UseHisiOptimizations, false,                            \
+          "Use HiSilicon-specific optimizations controlled by their "   \
+          "individual flags")                                           \
+  product(uint, StringCaseIntrinsicBackend, 0, DIAGNOSTIC,              \
+          "String case intrinsic backend: 0=off, "                      \
+          "1=sve, 2=sve2, 3=auto")                                      \
+          range(0, 3)                                                   \
+  product(int, StringCaseIntrinsicMinLength, 8, DIAGNOSTIC,             \
+          "Minimum character count for String case intrinsic "          \
+          "stub calls")                                                 \
+          range(0, max_jint)                                            \
+  product(bool, UseStringEqualsIgnoreCaseIntrinsic, false,              \
+          DIAGNOSTIC,                                                   \
+          "Use the SVE String.equalsIgnoreCase intrinsic")              \
+  product(int, StringEqualsIgnoreCaseIntrinsicMinLength, 16,            \
+          DIAGNOSTIC,                                                   \
+          "Minimum number of code units for the "                       \
+          "String.equalsIgnoreCase intrinsic")                          \
+          range(0, max_jint)                                            \
+  product(bool, UseSVEHashCodeIntrinsic, false,                         \
+          "Use SVE2 instructions in the vectorized hashcode intrinsic") \
+  product(bool, UseStreamPrefetchForArrayCopy, false,                   \
+          "Use ASIMD forward bulk arraycopy stub with streaming "        \
+          "prefetch")                                                   \
+  product(uint, StreamPrefetchArrayCopyMinLongs, 16, DIAGNOSTIC,        \
+          "Minimum number of long elements before using ASIMD forward "  \
+          "bulk arraycopy stub with streaming prefetch after the inline "\
+          "small-copy path")                                            \
+          range(0, max_jint)                                            \
+  product(bool, UseSVESmallBlockZeroing, false,                         \
+          "Use SVE stores in the C2 zeroing stub path for bounded small "\
+          "clears")                                                     \
+  product(uint, SVESmallBlockZeroingMaxWords, 256, DIAGNOSTIC,          \
+          "Maximum HeapWords cleared by the small SVE zeroing path")     \
+          range(0, max_jint)                                            \
+  product(uint, SVEHashCodeStubMinVectorChunks, 1, DIAGNOSTIC,          \
+          "Minimum number of full SVE vector chunks before using SVE2 "  \
+          "hashcode stubs")                                             \
+          range(1, 64)                                                  \
+  product(uint, SVEHashCodeLatin1MinElements, 64, DIAGNOSTIC,           \
+          "Minimum Latin1 element count before using SVE2 hashcode "    \
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
+  product(uint, SVEHashCodeByteMinElements, 64, DIAGNOSTIC,             \
+          "Minimum byte array element count before using SVE2 hashcode " \
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
+  product(uint, SVEHashCodeUTF16MinElements, 256, DIAGNOSTIC,           \
+          "Minimum UTF16 element count before using SVE2 hashcode "     \
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
+  product(uint, SVEHashCodeShortMinElements, 256, DIAGNOSTIC,           \
+          "Minimum short array element count before using SVE2 hashcode "\
+          "stubs")                                                      \
+          range(1, max_jint)                                            \
   product(bool, UseCompactObjectHeaders, false, EXPERIMENTAL,           \
           "Use compact 64-bit object headers in 64-bit VM")             \
   product(bool, UseBlockZeroing, true,                                  \
@@ -219,8 +294,6 @@ define_pd_global(intx, InlineSmallCode,          1000);
   product(ccstr, NUMABindPolicy, nullptr,                               \
           "Enable deterministic NUMA placement with combined Options,"  \
           "including prefix=<id> and div=<N>.")                         \
-  product(bool, UseStlrForRelease, false,                               \
-          "Use stlr instead of dmb ish + str for release stores")       \
   product(bool, UseUTFConversionIntrinsics, false,                      \
           "Use Intrinsics for conversion between UTF8 and UTF16")       \
   product(ccstr, AutoSharedArchivePath, nullptr,                        \
@@ -228,6 +301,23 @@ define_pd_global(intx, InlineSmallCode,          1000);
           "the path save classlist and jsa file")                       \
   product(bool, PrintAutoAppCDS, false,                                 \
           "Print path and some information about AutoSharedArchivePath")\
+                                                                        \
+  product(ccstr, BytecodeEnhancementPaths, nullptr,                     \
+          "Bytecode enhancement paths. It contains enhancement lists "  \
+          "and enhancement contents")                                   \
+  product(bool, ExitOnBytecodeEnhancementFailure, false,                \
+          "Exit the VM when a bytecode enhancement cannot be applied")  \
+  product(bool, UsePrimitiveHashSet, false,                             \
+          "Replace java.util.HashSet with the JDK internal primitive "  \
+          "implementation")                                             \
+                                                                         \
+  product(bool, UseKMLPow, false,                                       \
+          "Use the Kunpeng Math Library implementation of Math.pow")    \
+                                                                        \
+  product(ccstr, KMLLibraryPath, nullptr,                               \
+          "Colon-separated list of absolute directories to search "     \
+          "for libkm.so; use the system dynamic library search "        \
+          "path if unset")                                              \
 
 // end of ARCH_FLAGS
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,21 +48,41 @@ class G1Analytics: public CHeapObj<mtGC> {
 
   TruncatedSeq _concurrent_refine_rate_ms_seq;
   TruncatedSeq _dirtied_cards_rate_ms_seq;
+#ifndef AARCH64
   TruncatedSeq _dirtied_cards_in_thread_buffers_seq;
   // The ratio between the number of scanned cards and actually merged cards, for
   // young-only and mixed gcs.
   G1PhaseDependentSeq _card_scan_to_merge_ratio_seq;
+#else /* AARCH64 */
+  // The ratio between the number of merged cards to actually scanned cards for
+  // card based remembered sets, for young-only and mixed gcs.
+  G1PhaseDependentSeq _card_merge_to_scan_ratio_seq;
+#endif /* AARCH64 */
 
   // The cost to scan a card during young-only and mixed gcs in ms.
   G1PhaseDependentSeq _cost_per_card_scan_ms_seq;
-  // The cost to merge a card during young-only and mixed gcs in ms.
+  // The cost to merge a card during GC; AArch64 tracks non-young remembered-set
+  // card merging.
   G1PhaseDependentSeq _cost_per_card_merge_ms_seq;
+#ifdef AARCH64
+  // The cost to scan entries in the code root remembered set in ms.
+  G1PhaseDependentSeq _cost_per_code_root_ms_seq;
+#endif /* AARCH64 */
   // The cost to copy a byte in ms.
   G1PhaseDependentSeq _cost_per_byte_copied_ms_seq;
 
   G1PhaseDependentSeq _pending_cards_seq;
+#ifndef AARCH64
   G1PhaseDependentSeq _rs_length_seq;
+#else /* AARCH64 */
+  G1PhaseDependentSeq _card_rs_length_seq;
+  G1PhaseDependentSeq _code_root_rs_length_seq;
+#endif /* AARCH64 */
 
+#ifdef AARCH64
+  // Prediction for merging the refinement table to the card table during GC.
+  TruncatedSeq _merge_refinement_table_ms_seq;
+#endif /* AARCH64 */
   TruncatedSeq _constant_other_time_ms_seq;
   TruncatedSeq _young_other_cost_per_region_ms_seq;
   TruncatedSeq _non_young_other_cost_per_region_ms_seq;
@@ -124,34 +144,61 @@ public:
   void report_alloc_rate_ms(double alloc_rate);
   void report_concurrent_refine_rate_ms(double cards_per_ms);
   void report_dirtied_cards_rate_ms(double cards_per_ms);
+#ifndef AARCH64
   void report_dirtied_cards_in_thread_buffers(size_t num_cards);
+#endif /* ! AARCH64 */
   void report_cost_per_card_scan_ms(double cost_per_remset_card_ms, bool for_young_only_phase);
   void report_cost_per_card_merge_ms(double cost_per_card_ms, bool for_young_only_phase);
+#ifndef AARCH64
   void report_card_scan_to_merge_ratio(double cards_per_entry_ratio, bool for_young_only_phase);
   void report_rs_length_diff(double rs_length_diff, bool for_young_only_phase);
+#else /* AARCH64 */
+  void report_cost_per_code_root_scan_ms(double cost_per_code_root_ms, bool for_young_only_phase);
+  void report_card_merge_to_scan_ratio(double merge_to_scan_ratio, bool for_young_only_phase);
+#endif /* AARCH64 */
   void report_cost_per_byte_ms(double cost_per_byte_ms, bool for_young_only_phase);
   void report_young_other_cost_per_region_ms(double other_cost_per_region_ms);
   void report_non_young_other_cost_per_region_ms(double other_cost_per_region_ms);
+#ifdef AARCH64
+  void report_merge_refinement_table_time_ms(double pending_card_merge_time_ms);
+#endif /* AARCH64 */
   void report_constant_other_time_ms(double constant_other_time_ms);
   void report_pending_cards(double pending_cards, bool for_young_only_phase);
+#ifndef AARCH64
   void report_rs_length(double rs_length, bool for_young_only_phase);
+#else /* AARCH64 */
+  void report_card_rs_length(double card_rs_length, bool for_young_only_phase);
+  void report_code_root_rs_length(double code_root_rs_length, bool for_young_only_phase);
+#endif /* AARCH64 */
 
   double predict_alloc_rate_ms() const;
   int num_alloc_rate_ms() const;
 
   double predict_concurrent_refine_rate_ms() const;
   double predict_dirtied_cards_rate_ms() const;
+#ifndef AARCH64
   size_t predict_dirtied_cards_in_thread_buffers() const;
+#endif /* ! AARCH64 */
 
   // Predict how many of the given remembered set of length rs_length will add to
   // the number of total cards scanned.
+#ifndef AARCH64
   size_t predict_scan_card_num(size_t rs_length, bool for_young_only_phase) const;
+#else /* AARCH64 */
+  size_t predict_scan_card_num(size_t card_rs_length, bool for_young_only_phase) const;
+#endif /* AARCH64 */
 
   double predict_card_merge_time_ms(size_t card_num, bool for_young_only_phase) const;
   double predict_card_scan_time_ms(size_t card_num, bool for_young_only_phase) const;
 
+#ifdef AARCH64
+  double predict_code_root_scan_time_ms(size_t code_root_num, bool for_young_only_phase) const;
+#endif /* AARCH64 */
   double predict_object_copy_time_ms(size_t bytes_to_copy, bool for_young_only_phase) const;
 
+#ifdef AARCH64
+  double predict_merge_refinement_table_time_ms() const;
+#endif /* AARCH64 */
   double predict_constant_other_time_ms() const;
 
   double predict_young_other_time_ms(size_t young_num) const;
@@ -162,7 +209,12 @@ public:
 
   double predict_cleanup_time_ms() const;
 
+#ifndef AARCH64
   size_t predict_rs_length(bool for_young_only_phase) const;
+#else /* AARCH64 */
+  size_t predict_card_rs_length(bool for_young_only_phase) const;
+  size_t predict_code_root_rs_length(bool for_young_only_phase) const;
+#endif /* AARCH64 */
   size_t predict_pending_cards(bool for_young_only_phase) const;
 
   // Add a new GC of the given duration and end time to the record.

@@ -25,6 +25,16 @@
 #ifndef SHARE_OPTO_PHASETYPE_HPP
 #define SHARE_OPTO_PHASETYPE_HPP
 
+#ifdef AARCH64
+#define MACRO_EXPANSION_PHASES(flags) \
+  flags(BEFORE_MACRO_EXPANSION,       "Before Macro Expansion") \
+  flags(AFTER_MACRO_EXPANSION_STEP,   "After Macro Expansion Step") \
+  flags(AFTER_MACRO_EXPANSION,        "After Macro Expansion")
+#else
+#define MACRO_EXPANSION_PHASES(flags) \
+  flags(MACRO_EXPANSION,              "Macro expand")
+#endif /* AARCH64 */
+
 #define COMPILER_PHASES(flags) \
   flags(BEFORE_STRINGOPTS,            "Before StringOpts") \
   flags(AFTER_STRINGOPTS,             "After StringOpts") \
@@ -56,7 +66,7 @@
   flags(CCP1,                         "PhaseCCP 1") \
   flags(ITER_GVN2,                    "Iter GVN 2") \
   flags(PHASEIDEALLOOP_ITERATIONS,    "PhaseIdealLoop iterations") \
-  flags(MACRO_EXPANSION,              "Macro expand") \
+  MACRO_EXPANSION_PHASES(flags) \
   flags(BARRIER_EXPANSION,            "Barrier expand") \
   flags(OPTIMIZE_FINISHED,            "Optimize finished") \
   flags(BEFORE_MATCHING,              "Before matching") \
@@ -88,6 +98,8 @@ static const char* phase_names[] = {
        COMPILER_PHASES(array_of_labels)
 #undef array_of_labels
 };
+
+#undef MACRO_EXPANSION_PHASES
 
 class CompilerPhaseTypeHelper {
   public:

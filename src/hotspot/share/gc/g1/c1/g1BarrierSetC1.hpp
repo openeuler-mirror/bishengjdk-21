@@ -91,6 +91,7 @@ class G1PreBarrierStub: public CodeStub {
 #endif // PRODUCT
 };
 
+#ifndef AARCH64
 class G1PostBarrierStub: public CodeStub {
   friend class G1BarrierSetC1;
  private:
@@ -119,12 +120,15 @@ class G1PostBarrierStub: public CodeStub {
 #endif // PRODUCT
 };
 
+#endif /* ! AARCH64 */
 class CodeBlob;
 
 class G1BarrierSetC1 : public ModRefBarrierSetC1 {
  protected:
   CodeBlob* _pre_barrier_c1_runtime_code_blob;
+#ifndef AARCH64
   CodeBlob* _post_barrier_c1_runtime_code_blob;
+#endif /* ! AARCH64 */
 
   virtual void pre_barrier(LIRAccess& access, LIR_Opr addr_opr,
                            LIR_Opr pre_val, CodeEmitInfo* info);
@@ -134,11 +138,16 @@ class G1BarrierSetC1 : public ModRefBarrierSetC1 {
 
  public:
   G1BarrierSetC1()
-    : _pre_barrier_c1_runtime_code_blob(nullptr),
-      _post_barrier_c1_runtime_code_blob(nullptr) {}
+    : _pre_barrier_c1_runtime_code_blob(nullptr)
+#ifndef AARCH64
+    , _post_barrier_c1_runtime_code_blob(nullptr)
+#endif /* ! AARCH64 */
+  {}
 
   CodeBlob* pre_barrier_c1_runtime_code_blob() { return _pre_barrier_c1_runtime_code_blob; }
+#ifndef AARCH64
   CodeBlob* post_barrier_c1_runtime_code_blob() { return _post_barrier_c1_runtime_code_blob; }
+#endif /* ! AARCH64 */
 
   virtual void generate_c1_runtime_stubs(BufferBlob* buffer_blob);
 };

@@ -24,6 +24,10 @@
 
 #include "precompiled.hpp"
 #include "gc/g1/g1CollectionSetCandidates.hpp"
+#ifdef AARCH64
+#include "gc/g1/g1CollectedHeap.inline.hpp"
+#include "gc/g1/g1Policy.hpp"
+#endif /* AARCH64 */
 #include "gc/g1/g1CollectionSetChooser.hpp"
 #include "gc/g1/heapRegion.inline.hpp"
 #include "utilities/bitMap.inline.hpp"
@@ -38,6 +42,18 @@ void G1CollectionCandidateList::set(G1CollectionCandidateList::CandidateInfo* ca
   _candidates.appendAll(&a);
 }
 
+#ifdef AARCH64
+void G1CollectionCandidateList::append_unsorted(HeapRegion* r) {
+  G1Policy* policy = G1CollectedHeap::heap()->policy();
+  CandidateInfo c(r, policy->predict_gc_efficiency(r));
+  _candidates.append(c);
+}
+
+void G1CollectionCandidateList::sort_by_efficiency() {
+  _candidates.sort(compare);
+}
+
+#endif /* AARCH64 */
 void G1CollectionCandidateList::remove(G1CollectionCandidateRegionList* other) {
   guarantee((uint)_candidates.length() >= other->length(), "must be");
 
@@ -142,6 +158,9 @@ void G1CollectionCandidateRegionList::clear() {
 
 G1CollectionSetCandidates::G1CollectionSetCandidates() :
   _marking_regions(),
+#ifdef AARCH64
+  _retained_regions(),
+#endif /* AARCH64 */
   _contains_map(nullptr),
   _max_regions(0),
   _last_marking_candidates_length(0)
@@ -165,6 +184,9 @@ void G1CollectionSetCandidates::initialize(uint max_regions) {
 
 void G1CollectionSetCandidates::clear() {
   _marking_regions.clear();
+#ifdef AARCH64
+  _retained_regions.clear();
+#endif /* AARCH64 */
   for (uint i = 0; i < _max_regions; i++) {
     _contains_map[i] = CandidateOrigin::Invalid;
   }
@@ -188,8 +210,46 @@ void G1CollectionSetCandidates::set_candidates_from_marking(G1CollectionCandidat
   verify();
 }
 
+#ifdef AARCH64
+void G1CollectionSetCandidates::sort_by_efficiency() {
+  // From marking regions must always be sorted so no reason to actually sort
+  // them.
+  _marking_regions.verify();
+  _retained_regions.sort_by_efficiency();
+  _retained_regions.verify();
+}
+
+void G1CollectionSetCandidates::add_retained_region_unsorted(HeapRegion* r) {
+  assert(!contains(r), "must not contain region %u", r->hrm_index());
+  _contains_map[r->hrm_index()] = CandidateOrigin::Retained;
+  _retained_regions.append_unsorted(r);
+}
+
+#endif /* AARCH64 */
 void G1CollectionSetCandidates::remove(G1CollectionCandidateRegionList* other) {
+#ifndef AARCH64
   _marking_regions.remove(other);
+#else /* AARCH64 */
+  // During removal, we exploit the fact that elements in the marking_regions,
+  // retained_regions and other list are sorted by gc_efficiency. Furthermore,
+  // all regions in the passed other list are in one of the two other lists.
+  //
+  // Split original list into elements for the marking list and elements from the
+  // retained list.
+  G1CollectionCandidateRegionList other_marking_regions;
+  G1CollectionCandidateRegionList other_retained_regions;
+
+  for (HeapRegion* r : *other) {
+    if (is_from_marking(r)) {
+      other_marking_regions.append(r);
+    } else {
+      other_retained_regions.append(r);
+    }
+  }
+
+  _marking_regions.remove(&other_marking_regions);
+  _retained_regions.remove(&other_retained_regions);
+#endif /* AARCH64 */
 
   for (HeapRegion* r : *other) {
     assert(contains(r), "must contain region %u", r->hrm_index());
@@ -204,10 +264,24 @@ bool G1CollectionSetCandidates::is_empty() const {
 }
 
 bool G1CollectionSetCandidates::has_more_marking_candidates() const {
-  return _marking_regions.length() != 0;
+  return marking_regions_length() != 0;
 }
 
+#ifdef AARCH64
+uint G1CollectionSetCandidates::retained_regions_length() const {
+  return _retained_regions.length();
+}
+#endif /* AARCH64 */
+
 #ifndef PRODUCT
+bool G1CollectionSetCandidates::is_valid_candidate_origin(CandidateOrigin origin) const {
+  return origin == CandidateOrigin::Marking
+#ifdef AARCH64
+         || origin == CandidateOrigin::Retained
+#endif
+         ;
+}
+
 void G1CollectionSetCandidates::verify_helper(G1CollectionCandidateList* list, uint& from_marking, CandidateOrigin* verify_map) {
   list->verify();
 
@@ -218,7 +292,7 @@ void G1CollectionSetCandidates::verify_helper(G1CollectionCandidateList* list, u
       from_marking++;
     }
     const uint hrm_index = r->hrm_index();
-    assert(_contains_map[hrm_index] == CandidateOrigin::Marking,
+    assert(is_valid_candidate_origin(_contains_map[hrm_index]),
            "must be %u is %u", hrm_index, (uint)_contains_map[hrm_index]);
     assert(verify_map[hrm_index] == CandidateOrigin::Invalid, "already added");
 
@@ -238,6 +312,14 @@ void G1CollectionSetCandidates::verify() {
 
   assert(from_marking == marking_regions_length(), "must be");
 
+#ifdef AARCH64
+  uint from_marking_retained = 0;
+  verify_helper(&_retained_regions, from_marking_retained, verify_map);
+  assert(from_marking_retained == 0, "must be");
+
+  assert(length() >= marking_regions_length(), "must be");
+
+#endif /* AARCH64 */
   // Check whether the _contains_map is consistent with the list.
   for (uint i = 0; i < _max_regions; i++) {
     assert(_contains_map[i] == verify_map[i] ||
@@ -262,6 +344,9 @@ const char* G1CollectionSetCandidates::get_short_type_str(const HeapRegion* r) c
   static const char* type_strings[] = {
     "Ci",  // Invalid
     "Cm",  // Marking
+#ifdef AARCH64
+    "Cr",  // Retained
+#endif /* AARCH64 */
     "Cv"   // Verification
   };
 

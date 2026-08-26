@@ -100,6 +100,13 @@ public:
 
   // Put the given set of candidates into this list, preserving the efficiency ordering.
   void set(CandidateInfo* candidate_infos, uint num_infos);
+#ifdef AARCH64
+  // Add the given HeapRegion to this list at the end, (potentially) making the list unsorted.
+  void append_unsorted(HeapRegion* r);
+  // Restore sorting order by decreasing gc efficiency, using the existing efficiency
+  // values.
+  void sort_by_efficiency();
+#endif /* AARCH64 */
   // Removes any HeapRegions stored in this list also in the other list. The other
   // list may only contain regions in this list, sorted by gc efficiency. It need
   // not be a prefix of this list. Returns the number of regions removed.
@@ -132,10 +139,18 @@ public:
 // Iterator for G1CollectionSetCandidates.
 class G1CollectionSetCandidatesIterator : public StackObj {
   G1CollectionSetCandidates* _which;
+#ifndef AARCH64
   uint _marking_position;
+#else /* AARCH64 */
+  uint _position;
+#endif /* AARCH64 */
 
 public:
+#ifndef AARCH64
   G1CollectionSetCandidatesIterator(G1CollectionSetCandidates* which, uint marking_position);
+#else /* AARCH64 */
+  G1CollectionSetCandidatesIterator(G1CollectionSetCandidates* which, uint position);
+#endif /* AARCH64 */
 
   G1CollectionSetCandidatesIterator& operator++();
   HeapRegion* operator*();
@@ -146,26 +161,32 @@ public:
 
 // Tracks all collection set candidates, i.e. regions that could/should be evacuated soon.
 //
-// These candidate regions are tracked in a list of regions, sorted by decreasing
-// "gc efficiency".
-//
-// Currently there is only one type of such regions:
-//
+// These candidate regions are tracked in lists of regions, sorted by decreasing
+// "gc efficiency":
 // * marking_regions: the set of regions selected by concurrent marking to be
 //                    evacuated to keep overall heap occupancy stable.
 //                    They are guaranteed to be evacuated and cleared out during
 //                    the mixed phase.
-//
+// On AArch64, retained regions form an additional candidate list:
+// * retained_regions: set of regions selected for evacuation during evacuation
+//                     failure.
+//                     Any young collection will try to evacuate them.
 class G1CollectionSetCandidates : public CHeapObj<mtGC> {
   friend class G1CollectionSetCandidatesIterator;
 
   enum class CandidateOrigin : uint8_t {
     Invalid,
     Marking,                   // This region has been determined as candidate by concurrent marking.
+#ifdef AARCH64
+    Retained,                  // This region has been added because it has been retained after evacuation.
+#endif /* AARCH64 */
     Verify                     // Special value for verification.
   };
 
-  G1CollectionCandidateList _marking_regions;
+  G1CollectionCandidateList _marking_regions;  // Set of regions selected by concurrent marking.
+#ifdef AARCH64
+  G1CollectionCandidateList _retained_regions; // Set of regions selected from evacuation failed regions.
+#endif /* AARCH64 */
 
   CandidateOrigin* _contains_map;
   uint _max_regions;
@@ -180,6 +201,9 @@ public:
   ~G1CollectionSetCandidates();
 
   G1CollectionCandidateList& marking_regions() { return _marking_regions; }
+#ifdef AARCH64
+  G1CollectionCandidateList& retained_regions() { return _retained_regions; }
+#endif /* AARCH64 */
 
   void initialize(uint max_regions);
 
@@ -194,6 +218,13 @@ public:
   // regions.
   uint last_marking_candidates_length() const { return _last_marking_candidates_length; }
 
+#ifdef AARCH64
+  void sort_by_efficiency();
+
+  // Add the given region to the set of retained regions without regards to the
+  // gc efficiency sorting. The retained regions must be re-sorted manually later.
+  void add_retained_region_unsorted(HeapRegion* r);
+#endif /* AARCH64 */
   // Remove the given regions from the candidates. All given regions must be part
   // of the candidates.
   void remove(G1CollectionCandidateRegionList* other);
@@ -206,14 +237,24 @@ public:
   bool has_more_marking_candidates() const;
 
   uint marking_regions_length() const { return _marking_regions.length(); }
+#ifdef AARCH64
+  uint retained_regions_length() const;
+#endif /* AARCH64 */
 
 private:
+#ifndef PRODUCT
+  bool is_valid_candidate_origin(CandidateOrigin origin) const;
+#endif // !PRODUCT
   void verify_helper(G1CollectionCandidateList* list, uint& from_marking, CandidateOrigin* verify_map) PRODUCT_RETURN;
 
 public:
   void verify() PRODUCT_RETURN;
 
+#ifndef AARCH64
   uint length() const { return marking_regions_length(); }
+#else /* AARCH64 */
+  uint length() const { return marking_regions_length() + retained_regions_length(); }
+#endif /* AARCH64 */
 
   // Iteration
   G1CollectionSetCandidatesIterator begin() {
@@ -221,7 +262,11 @@ public:
   }
 
   G1CollectionSetCandidatesIterator end() {
+#ifndef AARCH64
     return G1CollectionSetCandidatesIterator(this, marking_regions_length());
+#else /* AARCH64 */
+    return G1CollectionSetCandidatesIterator(this, length());
+#endif /* AARCH64 */
   }
 };
 

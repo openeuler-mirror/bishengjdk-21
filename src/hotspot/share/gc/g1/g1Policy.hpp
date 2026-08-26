@@ -47,9 +47,16 @@
 class HeapRegion;
 class G1CollectionSet;
 class G1CollectionCandidateList;
+#ifdef AARCH64
+class G1CollectionCandidateRegionList;
+#endif /* AARCH64 */
 class G1CollectionSetCandidates;
 class G1CollectionSetChooser;
+#ifndef AARCH64
 class G1CollectionCandidateRegionList;
+#else /* AARCH64 */
+class G1ConcurrentRefineStats;
+#endif /* AARCH64 */
 class G1IHOPControl;
 class G1Analytics;
 class G1SurvivorRegions;
@@ -79,6 +86,9 @@ class G1Policy: public CHeapObj<mtGC> {
   GCPolicyCounters* _policy_counters;
 
   double _full_collection_start_sec;
+#ifdef AARCH64
+  double _cur_pause_start_sec;
+#endif /* AARCH64 */
 
   // Desired young gen length without taking actually available free regions into
   // account.
@@ -103,9 +113,24 @@ class G1Policy: public CHeapObj<mtGC> {
 
   uint _free_regions_at_end_of_collection;
 
+#ifndef AARCH64
   size_t _rs_length;
 
   size_t _pending_cards_at_gc_start;
+#else /* AARCH64 */
+  // Tracks the number of cards marked as dirty (only) during garbage collection
+  // (evacuation) on the card table.
+  // This is needed to properly account for those cards in the heuristics to start
+  // refinement at the correct time which needs to know how many cards are currently
+  // approximately on the card table.
+  // After the first completed refinement sweep of the refinement table between two
+  // garbage collections this value is reset to zero as that refinement processed all
+  // those cards.
+  size_t _pending_cards_from_gc;
+  // Tracks the approximate number of cards found as to-collection-set by either the
+  // garbage collection or the most recent refinement sweep.
+  size_t _to_collection_set_cards;
+#endif /* AARCH64 */
 
   G1ConcurrentStartToMixedTimeTracker _concurrent_start_to_mixed;
 
@@ -113,7 +138,11 @@ class G1Policy: public CHeapObj<mtGC> {
     return collector_state()->in_young_only_phase() && !collector_state()->mark_or_rebuild_in_progress();
   }
 
+#ifndef AARCH64
   double logged_cards_processing_time() const;
+#else /* AARCH64 */
+  double pending_cards_processing_time() const;
+#endif /* AARCH64 */
 public:
   const G1Predictions& predictor() const { return _predictor; }
   const G1Analytics* analytics()   const { return const_cast<const G1Analytics*>(_analytics); }
@@ -132,22 +161,44 @@ public:
     hr->install_surv_rate_group(_survivor_surv_rate_group);
   }
 
+#ifndef AARCH64
   void record_rs_length(size_t rs_length) {
     _rs_length = rs_length;
   }
+#else /* AARCH64 */
+  double cur_pause_start_sec() const {
+    return _cur_pause_start_sec;
+  }
+#endif /* AARCH64 */
 
+#ifndef AARCH64
   double predict_base_time_ms(size_t pending_cards) const;
+#else /* AARCH64 */
+  double predict_base_time_ms(size_t pending_cards, size_t card_rs_length) const;
+#endif /* AARCH64 */
 
+#ifndef AARCH64
 private:
+#endif /* ! AARCH64 */
   // Base time contains handling remembered sets and constant other time of the
   // whole young gen, refinement buffers, and copying survivors.
   // Basically everything but copying eden regions.
+#ifndef AARCH64
   double predict_base_time_ms(size_t pending_cards, size_t rs_length) const;
+#else /* AARCH64 */
+  double predict_base_time_ms(size_t pending_cards, size_t card_rs_length, size_t code_root_length) const;
+#endif /* AARCH64 */
 
   // Copy time for a region is copying live data.
   double predict_region_copy_time_ms(HeapRegion* hr, bool for_young_only_phase) const;
   // Merge-scan time for a region is handling remembered sets of that region (as a single unit).
   double predict_region_merge_scan_time(HeapRegion* hr, bool for_young_only_phase) const;
+#ifdef AARCH64
+  // Merge-scan time for card remembered-set entries, without per-region copy cost.
+  double predict_merge_scan_time(size_t card_rs_length) const;
+  // Code root scan time prediction for the given region.
+  double predict_region_code_root_scan_time(HeapRegion* hr, bool for_young_only_phase) const;
+#endif /* AARCH64 */
   // Non-copy time for a region is handling remembered sets and other time.
   double predict_region_non_copy_time_ms(HeapRegion* hr, bool for_young_only_phase) const;
 
@@ -161,6 +212,11 @@ public:
   // Total time for a region is handling remembered sets (as a single unit), copying its live data
   // and other time.
   double predict_region_total_time_ms(HeapRegion* hr, bool for_young_only_phase) const;
+
+#ifdef AARCH64
+  // GC efficiency based on JEP 522 card/table cost predictions.
+  double predict_gc_efficiency(HeapRegion* hr);
+#endif /* AARCH64 */
 
   void cset_regions_freed() {
     bool update = should_update_surv_rate_group_predictors();
@@ -207,10 +263,15 @@ private:
   double _mark_cleanup_start_sec;
 
   // Updates the internal young gen maximum and target and desired lengths.
-  // If no parameters are passed, predict pending cards and the RS length using
-  // the prediction model.
+  // If no parameters are passed, use the prediction model.  The legacy path
+  // predicts pending cards and RS length; AArch64 also predicts card-set and
+  // code-root remembered-set lengths.
   void update_young_length_bounds();
+#ifndef AARCH64
   void update_young_length_bounds(size_t pending_cards, size_t rs_length);
+#else /* AARCH64 */
+  void update_young_length_bounds(size_t pending_cards, size_t card_rs_length, size_t code_root_rs_length);
+#endif /* AARCH64 */
 
   // Calculate and return the minimum desired eden length based on the MMU target.
   uint calculate_desired_eden_length_by_mmu() const;
@@ -238,15 +299,24 @@ private:
 
   // Calculate desired young length based on current situation without taking actually
   // available free regions into account.
+#ifndef AARCH64
   uint calculate_young_desired_length(size_t pending_cards, size_t rs_length) const;
+#else /* AARCH64 */
+  uint calculate_young_desired_length(size_t pending_cards, size_t card_rs_length, size_t code_root_rs_length) const;
+#endif /* AARCH64 */
   // Limit the given desired young length to available free regions.
   uint calculate_young_target_length(uint desired_young_length) const;
   // The GCLocker might cause us to need more regions than the target. Calculate
   // the maximum number of regions to use in that case.
   uint calculate_young_max_length(uint target_young_length) const;
 
+#ifndef AARCH64
   size_t predict_bytes_to_copy(HeapRegion* hr) const;
+#endif /* ! AARCH64 */
   double predict_survivor_regions_evac_time() const;
+#ifdef AARCH64
+  double predict_retained_regions_evac_time() const;
+#endif /* AARCH64 */
 
   // Check whether a given young length (young_length) fits into the
   // given target pause time and whether the prediction for the amount
@@ -257,8 +327,23 @@ private:
                         uint base_free_regions, double target_pause_time_ms) const;
 
 public:
+#ifndef AARCH64
   size_t pending_cards_at_gc_start() const { return _pending_cards_at_gc_start; }
+#else /* AARCH64 */
+  size_t predict_bytes_to_copy(HeapRegion* hr) const;
 
+  double last_mutator_dirty_start_time_ms();
+  size_t pending_cards_from_gc() const { return _pending_cards_from_gc; }
+
+  size_t current_pending_cards();
+#endif /* AARCH64 */
+
+#ifdef AARCH64
+  size_t current_to_collection_set_cards();
+
+  // The minimum number of retained regions we will add to the CSet during a young GC.
+  uint min_retained_old_cset_length() const;
+#endif /* AARCH64 */
   // Calculate the minimum number of old regions we'll add to the CSet
   // during a single mixed GC given the initial number of regions selected during
   // marking.
@@ -268,6 +353,20 @@ public:
   // during a mixed GC.
   uint calc_max_old_cset_length() const;
 
+#ifdef AARCH64
+  double select_candidates_from_marking(G1CollectionCandidateList* marking_list,
+                                        double time_remaining_ms,
+                                        G1CollectionCandidateRegionList* initial_old_regions,
+                                        G1CollectionCandidateRegionList* optional_old_regions);
+  void select_candidates_from_retained(G1CollectionCandidateList* retained_list,
+                                       double time_remaining_ms,
+                                       G1CollectionCandidateRegionList* initial_old_regions,
+                                       G1CollectionCandidateRegionList* optional_old_regions);
+  void calculate_optional_collection_set_regions(G1CollectionCandidateRegionList* optional_regions,
+                                                 double time_remaining_ms,
+                                                 G1CollectionCandidateRegionList* selected_regions);
+
+#endif /* AARCH64 */
 private:
   void abandon_collection_set_candidates();
   // Sets up marking if proper conditions are met.
@@ -298,7 +397,11 @@ public:
   // Check the current value of the young list RSet length and
   // compare it against the last prediction. If the current value is
   // higher, recalculate the young list target length prediction.
+#ifndef AARCH64
   void revise_young_list_target_length(size_t rs_length);
+#else /* AARCH64 */
+  void revise_young_list_target_length(size_t pending_cards, size_t card_rs_length, size_t code_root_rs_length);
+#endif /* AARCH64 */
 
   // This should be called after the heap is resized.
   void record_new_heap_size(uint new_number_of_regions);
@@ -338,6 +441,7 @@ public:
 
   // Amount of allowed waste in bytes in the collection set.
   size_t allowed_waste_in_collection_set() const;
+#ifndef AARCH64
   // Calculate and fill in the initial and optional old gen candidate regions from
   // the given candidate list and the remaining time.
   // Returns the remaining time.
@@ -352,6 +456,7 @@ public:
   void calculate_optional_collection_set_regions(G1CollectionCandidateRegionList* optional_old_regions,
                                                  double time_remaining_ms,
                                                  G1CollectionCandidateRegionList* selected);
+#endif /* ! AARCH64 */
 
 private:
 
@@ -389,17 +494,56 @@ public:
 
   bool use_adaptive_young_list_length() const;
 
+#ifdef AARCH64
+  // Try to get an estimate of the currently available bytes in the young gen. This
+  // operation considers itself low-priority: if other threads need the resources
+  // required to get the information, return false to indicate that the caller
+  // should retry "soon".
+  bool try_get_available_bytes_estimate(size_t& bytes) const;
+  // Estimate time until next GC, based on remaining bytes available for
+  // allocation and the allocation rate.
+  double predict_time_to_next_gc_ms(size_t available_bytes) const;
+
+  // Adjust wait times to make them less frequent the longer the next GC is away.
+  // But don't increase the wait time too rapidly, further bound it by min_time_ms.
+  // This reduces the number of thread wakeups that just immediately
+  // go back to waiting, while still being responsive to behavior changes.
+  uint64_t adjust_wait_time_ms(double wait_time_ms, uint64_t min_time_ms);
+
+private:
+#endif /* AARCH64 */
   // Return an estimate of the number of bytes used in young gen.
   // precondition: holding Heap_lock
   size_t estimate_used_young_bytes_locked() const;
 
+#ifdef AARCH64
+public:
+
+#endif /* AARCH64 */
   void transfer_survivors_to_cset(const G1SurvivorRegions* survivors);
 
+#ifndef AARCH64
   // Record and log stats and pending cards before not-full collection.
   // thread_buffer_cards is the number of cards that were in per-thread
   // buffers.  pending_cards includes thread_buffer_cards.
   void record_concurrent_refinement_stats(size_t pending_cards,
                                           size_t thread_buffer_cards);
+#else /* AARCH64 */
+  // Record and log stats and pending cards to update predictors.
+  void record_refinement_stats(G1ConcurrentRefineStats* stats);
+
+  void record_dirtying_stats(double last_mutator_start_dirty_ms,
+                             double last_mutator_end_dirty_ms,
+                             size_t pending_cards,
+                             double yield_duration,
+                             size_t next_pending_cards_from_gc,
+                             size_t next_to_collection_set_cards);
+
+  bool should_retain_evac_failed_region(HeapRegion* r) const {
+    return should_retain_evac_failed_region(r->hrm_index());
+  }
+  bool should_retain_evac_failed_region(uint index) const;
+#endif /* AARCH64 */
 
 private:
   //
@@ -426,6 +570,11 @@ public:
   // Fraction used when evacuating the optional regions. This fraction of the
   // remaining time is used to choose what regions to include in the evacuation.
   double optional_evacuation_fraction() const { return 0.75; }
+#ifdef AARCH64
+  double max_time_for_retaining() const {
+    return max_pause_time_ms() * optional_prediction_fraction();
+  }
+#endif /* AARCH64 */
 
   uint tenuring_threshold() const { return _tenuring_threshold; }
 

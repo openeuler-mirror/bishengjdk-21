@@ -43,6 +43,16 @@ public class StringEquals {
     public String test5 = new String(test4); // equal to test4, but not same
     public String test6 = new String("0123456780");
     public String test7 = new String("0123\u01FE");
+    public String longLatin1 = longLatin1(512, -1);
+    public String longLatin1Equal = new String(longLatin1);
+    public String longLatin1DifferentFirst = longLatin1(512, 0);
+    public String longLatin1DifferentMiddle = longLatin1(512, 256);
+    public String longLatin1DifferentLast = longLatin1(512, 511);
+    public String longUTF16 = longUTF16(512, -1);
+    public String longUTF16Equal = new String(longUTF16);
+    public String longUTF16DifferentFirst = longUTF16(512, 0);
+    public String longUTF16DifferentMiddle = longUTF16(512, 256);
+    public String longUTF16DifferentLast = longUTF16(512, 511);
 
     @Benchmark
     public boolean different() {
@@ -73,5 +83,66 @@ public class StringEquals {
     public boolean equalsUTF16() {
         return test5.equals(test4);
     }
-}
 
+    @Benchmark
+    public boolean longLatin1Equal() {
+        return longLatin1.equals(longLatin1Equal);
+    }
+
+    @Benchmark
+    public boolean longLatin1DifferentFirst() {
+        return longLatin1.equals(longLatin1DifferentFirst);
+    }
+
+    @Benchmark
+    public boolean longLatin1DifferentMiddle() {
+        return longLatin1.equals(longLatin1DifferentMiddle);
+    }
+
+    @Benchmark
+    public boolean longLatin1DifferentLast() {
+        return longLatin1.equals(longLatin1DifferentLast);
+    }
+
+    @Benchmark
+    public boolean longUTF16Equal() {
+        return longUTF16.equals(longUTF16Equal);
+    }
+
+    @Benchmark
+    public boolean longUTF16DifferentFirst() {
+        return longUTF16.equals(longUTF16DifferentFirst);
+    }
+
+    @Benchmark
+    public boolean longUTF16DifferentMiddle() {
+        return longUTF16.equals(longUTF16DifferentMiddle);
+    }
+
+    @Benchmark
+    public boolean longUTF16DifferentLast() {
+        return longUTF16.equals(longUTF16DifferentLast);
+    }
+
+    private static String longLatin1(int length, int mismatchAt) {
+        char[] chars = new char[length];
+        for (int i = 0; i < chars.length; i++) {
+            chars[i] = (char) ('A' + (i % 26));
+        }
+        if (mismatchAt >= 0) {
+            chars[mismatchAt] = (char) (chars[mismatchAt] == 'Z' ? 'Y' : 'Z');
+        }
+        return new String(chars);
+    }
+
+    private static String longUTF16(int length, int mismatchAt) {
+        char[] chars = new char[length];
+        for (int i = 0; i < chars.length; i++) {
+            chars[i] = (char) ('\u0100' + (i % 127));
+        }
+        if (mismatchAt >= 0) {
+            chars[mismatchAt] = (char) (chars[mismatchAt] == '\u017f' ? '\u0180' : '\u017f');
+        }
+        return new String(chars);
+    }
+}

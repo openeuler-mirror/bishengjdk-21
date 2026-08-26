@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,34 +25,73 @@
 #ifndef SHARE_GC_G1_G1BARRIERSET_HPP
 #define SHARE_GC_G1_G1BARRIERSET_HPP
 
+#ifndef AARCH64
 #include "gc/g1/g1DirtyCardQueue.hpp"
+#endif /* ! AARCH64 */
 #include "gc/g1/g1SATBMarkQueueSet.hpp"
 #include "gc/shared/cardTable.hpp"
 #include "gc/shared/cardTableBarrierSet.hpp"
 #include "gc/shared/bufferNode.hpp"
 
 class G1CardTable;
+#ifdef AARCH64
+class Thread;
+#endif /* AARCH64 */
 
-// This barrier is specialized to use a logging barrier to support
-// snapshot-at-the-beginning marking.
-
+// G1 uses logging barriers to support snapshot-at-the-beginning marking.  The
+// AArch64 JEP 522 path also manages two card tables:
+// * one the mutator is currently working on ("card table")
+// * one the refinement threads or GC during pause are working on ("refinement table")
+//
+// The card table acts like a regular card table where the mutator dirties cards
+// containing potentially interesting references.  When the amount of dirty cards
+// on the card table exceeds a threshold, G1 swaps the card tables and has the
+// refinement threads update remembered sets from the refinement table while the
+// mutator continues dirtying the now empty card table.  This removes the need for
+// per-mutator-write synchronization between the mutator and refinement threads.
+//
+// During a GC pause, if the refinement table is known to be non-empty, G1 merges
+// it back into the card table that is scanned for dirty cards.
 class G1BarrierSet: public CardTableBarrierSet {
   friend class VMStructs;
  private:
   BufferNode::Allocator _satb_mark_queue_buffer_allocator;
+#ifndef AARCH64
   BufferNode::Allocator _dirty_card_queue_buffer_allocator;
+#endif /* ! AARCH64 */
   G1SATBMarkQueueSet _satb_mark_queue_set;
+#ifndef AARCH64
   G1DirtyCardQueueSet _dirty_card_queue_set;
+#else /* AARCH64 */
+
+  G1CardTable* _refinement_table;
+
+ public:
+  G1BarrierSet(G1CardTable* card_table, G1CardTable* refinement_table);
+  virtual ~G1BarrierSet();
+#endif /* AARCH64 */
 
   static G1BarrierSet* g1_barrier_set() {
     return barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
   }
 
+#ifndef AARCH64
   void invalidate(JavaThread* thread, MemRegion mr);
+#else /* AARCH64 */
+  G1CardTable* refinement_table() const { return _refinement_table; }
+#endif /* AARCH64 */
 
+#ifndef AARCH64
  public:
   G1BarrierSet(G1CardTable* table);
   ~G1BarrierSet() { }
+#else /* AARCH64 */
+  // Swap the global card table references, without synchronization.
+  void swap_global_card_table();
+
+  // Update the given thread's card table (byte map) base to the current card table's.
+  void update_card_table_base(Thread* thread);
+#endif /* AARCH64 */
 
   virtual bool card_mark_must_follow_store() const {
     return true;
@@ -73,14 +112,25 @@ class G1BarrierSet: public CardTableBarrierSet {
   template <DecoratorSet decorators, typename T>
   void write_ref_field_pre(T* field);
 
+#ifndef AARCH64
   inline void invalidate(MemRegion mr);
   inline void write_region(JavaThread* thread, MemRegion mr);
 
   inline void write_ref_array_work(MemRegion mr);
+#else /* AARCH64 */
+  inline void write_region(MemRegion mr);
+  void write_region(JavaThread* thread, MemRegion mr);
+#endif /* AARCH64 */
 
+#ifndef AARCH64
   template <DecoratorSet decorators, typename T>
+#else /* AARCH64 */
+  template <DecoratorSet decorators = DECORATORS_NONE, typename T>
+#endif /* AARCH64 */
   void write_ref_field_post(T* field);
+#ifndef AARCH64
   void write_ref_field_post_slow(volatile CardValue* byte);
+#endif /* ! AARCH64 */
 
   virtual void on_thread_create(Thread* thread);
   virtual void on_thread_destroy(Thread* thread);
@@ -91,9 +141,13 @@ class G1BarrierSet: public CardTableBarrierSet {
     return g1_barrier_set()->_satb_mark_queue_set;
   }
 
+#ifndef AARCH64
   static G1DirtyCardQueueSet& dirty_card_queue_set() {
     return g1_barrier_set()->_dirty_card_queue_set;
   }
+#else /* AARCH64 */
+  virtual void print_on(outputStream* st) const;
+#endif /* AARCH64 */
 
   // Callbacks for runtime accesses.
   template <DecoratorSet decorators, typename BarrierSetT = G1BarrierSet>

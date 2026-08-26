@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,16 +59,18 @@ public:
 // - Redirty Logged Cards
 // - Restore Preserved Marks (on evacuation failure)
 // - Free Collection Set
-// - Resize TLABs
+// - Resize TLABs, and swap card tables on AArch64
 class G1PostEvacuateCollectionSetCleanupTask2 : public G1BatchedTask {
   class EagerlyReclaimHumongousObjectsTask;
 #if COMPILER2_OR_JVMCI
   class UpdateDerivedPointersTask;
 #endif
 
-  class ClearRetainedRegionBitmaps;
-  class RedirtyLoggedCardsTask;
   class RestorePreservedMarksTask;
+  class ProcessEvacuationFailedRegionsTask;
+#ifndef AARCH64
+  class RedirtyLoggedCardsTask;
+#endif /* ! AARCH64 */
   class FreeCollectionSetTask;
   class ResizeTLABsTask;
 

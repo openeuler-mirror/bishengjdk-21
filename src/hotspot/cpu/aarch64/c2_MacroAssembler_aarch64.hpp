@@ -130,6 +130,11 @@
                                 unsigned vector_length_in_bytes,
                                 FloatRegister vtmp1, FloatRegister vtmp2);
 
+  void sve_reduce_mul_integral(Register dst, BasicType bt,
+                               Register isrc, FloatRegister vsrc,
+                               unsigned vector_length_in_bytes,
+                               FloatRegister vtmp1, FloatRegister vtmp2);
+
   void neon_reduce_mul_fp(FloatRegister dst, BasicType bt,
                           FloatRegister fsrc, FloatRegister vsrc,
                           unsigned vector_length_in_bytes, FloatRegister vtmp);

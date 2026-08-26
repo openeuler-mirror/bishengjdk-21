@@ -1,0 +1,50 @@
+#
+# Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+# This code is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 2 only, as
+# published by the Free Software Foundation.  Oracle designates this
+# particular file as subject to the "Classpath" exception as provided
+# by Oracle in the LICENSE file that accompanied this code.
+#
+# This code is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# version 2 for more details (a copy is included in the LICENSE file that
+# accompanied this code).
+#
+# You should have received a copy of the GNU General Public License version
+# 2 along with this work; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+# or visit www.oracle.com if you need additional information or have any
+# questions.
+#
+
+################################################################################
+
+ifeq ($(HOTSPOT_TARGET_CPU_ARCH), aarch64)
+  include $(TOPDIR)/make/ToolsHotspot.gmk
+
+  STRING_CASE_UCD_DIR := $(TOPDIR)/src/java.base/share/data/unicodedata
+  STRING_CASE_UNICODE_DATA := $(STRING_CASE_UCD_DIR)/UnicodeData.txt
+  STRING_CASE_SPECIAL_CASING := $(STRING_CASE_UCD_DIR)/SpecialCasing.txt
+  STRING_CASE_TEMPLATE := $(TOPDIR)/make/data/stringcasemappings/stringCaseMappings_aarch64.hpp.template
+  STRING_CASE_HEADER := $(JVM_VARIANT_OUTPUTDIR)/gensrc/stringCaseMappings_aarch64.hpp
+
+  $(eval $(call SetupExecute, generate_string_case_mappings, \
+      INFO := Generating AArch64 String case mapping tables, \
+      DEPS := $(STRING_CASE_UNICODE_DATA) $(STRING_CASE_SPECIAL_CASING) \
+          $(STRING_CASE_TEMPLATE) $(BUILD_TOOLS_HOTSPOT), \
+      OUTPUT_FILE := $(STRING_CASE_HEADER), \
+      COMMAND := $(TOOL_GENERATESTRINGCASEMAPPINGS) \
+          $(STRING_CASE_UNICODE_DATA) $(STRING_CASE_SPECIAL_CASING) \
+          $(STRING_CASE_TEMPLATE) $(STRING_CASE_HEADER), \
+  ))
+
+  TARGETS += $(generate_string_case_mappings_TARGET)
+endif
+
+################################################################################

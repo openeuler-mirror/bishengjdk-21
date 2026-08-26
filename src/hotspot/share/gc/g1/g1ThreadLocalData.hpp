@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,11 @@
 #define SHARE_GC_G1_G1THREADLOCALDATA_HPP
 
 #include "gc/g1/g1BarrierSet.hpp"
+#ifdef AARCH64
+#include "gc/g1/g1CardTable.hpp"
+#else
 #include "gc/g1/g1DirtyCardQueue.hpp"
+#endif
 #include "gc/shared/gc_globals.hpp"
 #include "gc/shared/satbMarkQueue.hpp"
 #include "runtime/javaThread.hpp"
@@ -35,11 +39,19 @@
 class G1ThreadLocalData {
 private:
   SATBMarkQueue _satb_mark_queue;
+#ifdef AARCH64
+  G1CardTable::CardValue* _byte_map_base;
+#else
   G1DirtyCardQueue _dirty_card_queue;
+#endif
 
   G1ThreadLocalData() :
-      _satb_mark_queue(&G1BarrierSet::satb_mark_queue_set()),
-      _dirty_card_queue(&G1BarrierSet::dirty_card_queue_set()) {}
+      _satb_mark_queue(&G1BarrierSet::satb_mark_queue_set())
+#ifdef AARCH64
+      , _byte_map_base(nullptr) { }
+#else
+      , _dirty_card_queue(&G1BarrierSet::dirty_card_queue_set()) { }
+#endif
 
   static G1ThreadLocalData* data(Thread* thread) {
     assert(UseG1GC, "Sanity");
@@ -50,9 +62,11 @@ private:
     return Thread::gc_data_offset() + byte_offset_of(G1ThreadLocalData, _satb_mark_queue);
   }
 
+#ifndef AARCH64
   static ByteSize dirty_card_queue_offset() {
     return Thread::gc_data_offset() + byte_offset_of(G1ThreadLocalData, _dirty_card_queue);
   }
+#endif
 
 public:
   static void create(Thread* thread) {
@@ -67,9 +81,11 @@ public:
     return data(thread)->_satb_mark_queue;
   }
 
+#ifndef AARCH64
   static G1DirtyCardQueue& dirty_card_queue(Thread* thread) {
     return data(thread)->_dirty_card_queue;
   }
+#endif
 
   static ByteSize satb_mark_queue_active_offset() {
     return satb_mark_queue_offset() + SATBMarkQueue::byte_offset_of_active();
@@ -83,6 +99,21 @@ public:
     return satb_mark_queue_offset() + SATBMarkQueue::byte_offset_of_buf();
   }
 
+#ifdef AARCH64
+  static ByteSize card_table_base_offset() {
+    return Thread::gc_data_offset() + byte_offset_of(G1ThreadLocalData, _byte_map_base);
+  }
+
+  static void set_byte_map_base(Thread* thread, G1CardTable::CardValue* new_byte_map_base) {
+    data(thread)->_byte_map_base = new_byte_map_base;
+  }
+
+#ifndef PRODUCT
+  static G1CardTable::CardValue* get_byte_map_base(Thread* thread) {
+    return data(thread)->_byte_map_base;
+  }
+#endif
+#else
   static ByteSize dirty_card_queue_index_offset() {
     return dirty_card_queue_offset() + G1DirtyCardQueue::byte_offset_of_index();
   }
@@ -90,6 +121,7 @@ public:
   static ByteSize dirty_card_queue_buffer_offset() {
     return dirty_card_queue_offset() + G1DirtyCardQueue::byte_offset_of_buf();
   }
+#endif
 };
 
 #endif // SHARE_GC_G1_G1THREADLOCALDATA_HPP

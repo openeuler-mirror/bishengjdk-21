@@ -148,6 +148,7 @@ inline void G1CollectedHeap::old_set_remove(HeapRegion* hr) {
   _old_set.remove(hr);
 }
 
+#ifndef AARCH64
 // It dirties the cards that cover the block so that the post
 // write barrier never queues anything when updating objects on this
 // block. It is assumed (and in fact we assert) that the block
@@ -172,6 +173,7 @@ G1CollectedHeap::dirty_young_block(HeapWord* start, size_t word_size) {
   card_table()->g1_mark_as_young(mr);
 }
 
+#endif /* ! AARCH64 */
 inline G1ScannerTasksQueueSet* G1CollectedHeap::task_queues() const {
   return _task_queues;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -760,6 +760,9 @@ class Compile : public Phase {
   void remove_useless_unstable_if_traps(Unique_Node_List &useful);
   void process_for_unstable_if_traps(PhaseIterGVN& igvn);
 
+#ifdef AARCH64
+  void shuffle_macro_nodes();
+#endif /* AARCH64 */
   void sort_macro_nodes();
 
   // Remove the opaque nodes that protect the Parse Predicates so that the unused checks and

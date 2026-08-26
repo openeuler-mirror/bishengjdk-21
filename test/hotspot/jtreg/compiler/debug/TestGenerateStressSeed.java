@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,6 +39,17 @@ import jdk.test.lib.process.ProcessTools;
  * @run driver compiler.debug.TestGenerateStressSeed StressGCM
  * @run driver compiler.debug.TestGenerateStressSeed StressIGVN
  * @run driver compiler.debug.TestGenerateStressSeed StressCCP
+ */
+
+/*
+ * @test id=StressMacroExpansion
+ * @key stress randomness
+ * @bug 8317349
+ * @requires os.arch == "aarch64" & vm.compiler2.enabled
+ * @summary Tests that StressMacroExpansion without -XX:StressSeed=N generates
+ *          and logs a random seed.
+ * @library /test/lib /
+ * @run driver compiler.debug.TestGenerateStressSeed StressMacroExpansion
  */
 
 public class TestGenerateStressSeed {

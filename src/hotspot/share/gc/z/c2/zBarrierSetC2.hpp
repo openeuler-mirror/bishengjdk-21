@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,12 +41,18 @@ class MachNode;
 
 class MacroAssembler;
 
+#ifndef AARCH64
 class ZBarrierStubC2 : public ArenaObj {
+#else /* AARCH64 */
+class ZBarrierStubC2 : public BarrierStubC2 {
+#endif /* AARCH64 */
 protected:
+#ifndef AARCH64
   const MachNode* _node;
   Label           _entry;
   Label           _continuation;
 
+#endif /* ! AARCH64 */
 static void register_stub(ZBarrierStubC2* stub);
 static void inc_trampoline_stubs_count();
 static int trampoline_stubs_count();
@@ -55,11 +61,13 @@ static int stubs_start_offset();
   ZBarrierStubC2(const MachNode* node);
 
 public:
+#ifndef AARCH64
   RegMask& live() const;
   Label* entry();
   Label* continuation();
 
   virtual Register result() const = 0;
+#endif /* ! AARCH64 */
   virtual void emit_code(MacroAssembler& masm) = 0;
 };
 
@@ -78,7 +86,9 @@ public:
   Register ref() const;
   address slow_path() const;
 
+#ifndef AARCH64
   virtual Register result() const;
+#endif /* ! AARCH64 */
   virtual void emit_code(MacroAssembler& masm);
 };
 
@@ -102,14 +112,18 @@ public:
   bool is_native() const;
   bool is_atomic() const;
 
+#ifndef AARCH64
   virtual Register result() const;
+#endif /* ! AARCH64 */
   virtual void emit_code(MacroAssembler& masm);
 };
 
 class ZBarrierSetC2 : public BarrierSetC2 {
 private:
+#ifndef AARCH64
   void compute_liveness_at_stubs() const;
   void analyze_dominating_barriers_impl(Node_List& accesses, Node_List& access_dominators) const;
+#endif /* ! AARCH64 */
   void analyze_dominating_barriers() const;
 
 protected:
@@ -128,6 +142,9 @@ protected:
                                         const Type* val_type) const;
 
 public:
+#ifdef AARCH64
+  virtual uint estimated_barrier_size(const Node* node) const;
+#endif /* AARCH64 */
   virtual void* create_barrier_state(Arena* comp_arena) const;
   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc,
                                                BasicType type,
@@ -137,6 +154,9 @@ public:
   virtual void clone_at_expansion(PhaseMacroExpand* phase,
                                   ArrayCopyNode* ac) const;
 
+#ifdef AARCH64
+  virtual void elide_dominated_barrier(MachNode* mach) const;
+#endif /* AARCH64 */
   virtual void late_barrier_analysis() const;
   virtual int estimate_stub_size() const;
   virtual void emit_stubs(CodeBuffer& cb) const;

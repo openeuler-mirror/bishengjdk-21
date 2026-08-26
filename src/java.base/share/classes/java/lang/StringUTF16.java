@@ -40,6 +40,8 @@ import static java.lang.String.UTF16;
 import static java.lang.String.LATIN1;
 
 final class StringUTF16 {
+    private static final int CI_MATCH = -1;
+    private static final int CI_MISMATCH = -2;
 
     // Return a new byte array for a UTF16-coded string for len chars
     // Throw an exception if out of range
@@ -962,7 +964,27 @@ final class StringUTF16 {
 
     public static boolean regionMatchesCI(byte[] value, int toffset,
                                           byte[] other, int ooffset, int len) {
-        return compareToCIImpl(value, toffset, len, other, ooffset, len) == 0;
+        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS) {
+            return compareToCIImpl(value, toffset, len,
+                    other, ooffset, len) == 0;
+        }
+        int result = regionMatchesCIResult(value, toffset, other, ooffset, len);
+        if (result == CI_MATCH) {
+            return true;
+        }
+        if (result == CI_MISMATCH) {
+            return false;
+        }
+        assert result >= 0 && result <= len;
+        return compareToCIImpl(value, toffset + result, len - result,
+                other, ooffset + result, len - result) == 0;
+    }
+
+    @IntrinsicCandidate
+    private static int regionMatchesCIResult(byte[] value, int toffset,
+                                             byte[] other, int ooffset, int len) {
+        return compareToCIImpl(value, toffset, len, other, ooffset, len) == 0
+                ? CI_MATCH : CI_MISMATCH;
     }
 
     public static boolean regionMatchesCI_Latin1(byte[] value, int toffset,
@@ -1003,7 +1025,17 @@ final class StringUTF16 {
             return toLowerCaseEx(str, value, result, first, locale, false);
         }
         int bits = 0;
-        for (int i = first; i < len; i++) {
+        int start = first;
+        if (String.STRING_CASE_INTRINSICS) {
+            int processed = toLowerCaseSimple(value, result, first, len);
+            if (processed >= 0) {
+                bits = processed;
+                start = len;
+            } else {
+                start = -processed - 1;
+            }
+        }
+        for (int i = start; i < len; i++) {
             int cp = (int)getChar(value, i);
             if (cp == '\u03A3' ||                       // GREEK CAPITAL LETTER SIGMA
                 Character.isSurrogate((char)cp)) {
@@ -1024,6 +1056,28 @@ final class StringUTF16 {
         } else {
             return newString(result, 0, len);
         }
+    }
+
+    // Success returns a non-negative coder marker; fallback returns
+    // -(index + 1).
+    @IntrinsicCandidate
+    private static int toLowerCaseSimple(byte[] value, byte[] result, int first, int len) {
+        int bits = 0;
+        for (int i = first; i < len; i++) {
+            int cp = getChar(value, i);
+            if (cp == '\u03A3' ||                       // GREEK CAPITAL LETTER SIGMA
+                cp == '\u0130' ||                       // LATIN CAPITAL LETTER I WITH DOT ABOVE
+                Character.isSurrogate((char)cp)) {
+                return -(i + 1);
+            }
+            cp = Character.toLowerCase(cp);
+            if (!Character.isBmpCodePoint(cp)) {
+                return -(i + 1);
+            }
+            bits |= cp;
+            putChar(result, i, cp);
+        }
+        return bits;
     }
 
     private static String toLowerCaseEx(String str, byte[] value,
@@ -1108,7 +1162,17 @@ final class StringUTF16 {
             return toUpperCaseEx(str, value, result, first, locale, false);
         }
         int bits = 0;
-        for (int i = first; i < len; i++) {
+        int start = first;
+        if (String.STRING_CASE_INTRINSICS) {
+            int processed = toUpperCaseSimple(value, result, first, len);
+            if (processed >= 0) {
+                bits = processed;
+                start = len;
+            } else {
+                start = -processed - 1;
+            }
+        }
+        for (int i = start; i < len; i++) {
             int cp = (int)getChar(value, i);
             if (Character.isSurrogate((char)cp)) {
                 return toUpperCaseEx(str, value, result, i, locale, false);
@@ -1125,6 +1189,26 @@ final class StringUTF16 {
         } else {
             return newString(result, 0, len);
         }
+    }
+
+    // Success returns a non-negative coder marker; fallback returns
+    // -(index + 1).
+    @IntrinsicCandidate
+    private static int toUpperCaseSimple(byte[] value, byte[] result, int first, int len) {
+        int bits = 0;
+        for (int i = first; i < len; i++) {
+            int cp = getChar(value, i);
+            if (Character.isSurrogate((char)cp)) {
+                return -(i + 1);
+            }
+            cp = Character.toUpperCaseEx(cp);
+            if (!Character.isBmpCodePoint(cp)) {
+                return -(i + 1);
+            }
+            bits |= cp;
+            putChar(result, i, cp);
+        }
+        return bits;
     }
 
     private static String toUpperCaseEx(String str, byte[] value,

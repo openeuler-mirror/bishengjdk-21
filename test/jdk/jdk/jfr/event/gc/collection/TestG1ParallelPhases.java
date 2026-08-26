@@ -40,12 +40,14 @@ import java.lang.ref.WeakReference;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import gc.testlibrary.g1.MixedGCProvoker;
 import jdk.jfr.Recording;
 import jdk.test.lib.Asserts;
+import jdk.test.lib.Platform;
 import jdk.test.lib.jfr.EventNames;
 import jdk.test.whitebox.WhiteBox;
 
@@ -86,9 +88,7 @@ public class TestG1ParallelPhases {
             .map(e -> e.getValue("name").toString())
             .collect(toSet());
 
-        Set<String> allPhases = of(
-            "RetireTLABsAndFlushLogs",
-            "NonJavaThreadFlushLogs",
+        Set<String> allPhases = new HashSet<>(of(
             "ExtRootScan",
             "ThreadRoots",
             "VM Global",
@@ -100,18 +100,15 @@ public class TestG1ParallelPhases {
             "CMRefRoots",
             "MergeER",
             "MergeRS",
-            "MergeLB",
             "ScanHR",
             "CodeRoots",
             "ObjCopy",
             "Termination",
-            "RedirtyCards",
             "RecalculateUsed",
             "ResizeTLABs",
             "FreeCSet",
             "UpdateDerivedPointers",
             "EagerlyReclaimHumongousObjects",
-            "ClearLoggedCards",
             "MergePSS",
             "NonYoungFreeCSet",
             "YoungFreeCSet",
@@ -119,22 +116,37 @@ public class TestG1ParallelPhases {
             "SampleCandidates",
             "ResetMarkingState",
             "NoteStartOfMark"
-        );
+        ));
+        if (Platform.isAArch64()) {
+            allPhases.addAll(of("ClearPendingCards", "RetireTLABs"));
+        } else {
+            allPhases.addAll(of(
+                "RetireTLABsAndFlushLogs",
+                "NonJavaThreadFlushLogs",
+                "MergeLB",
+                "RedirtyCards",
+                "ClearLoggedCards"
+            ));
+        }
 
         // Some GC phases may or may not occur depending on environment. Filter them out
         // since we can not reliably guarantee that they occur (or not).
-        Set<String> optPhases = of(
+        Set<String> optPhases = new HashSet<>(of(
             // The following phases only occur on evacuation failure.
             "RestoreRetainedRegions",
             "RemoveSelfForwards",
             "RestorePreservedMarks",
-            "ClearRetainedRegionsBitmap",
             // Generally optional phases.
             "OptScanHR",
             "OptMergeRS",
             "OptCodeRoots",
             "OptObjCopy"
-        );
+        ));
+        if (Platform.isAArch64()) {
+            optPhases.addAll(of("SweepRT", "ProcessEvacuationFailedRegions"));
+        } else {
+            optPhases.add("ClearRetainedRegionsBitmap");
+        }
         usedPhases.removeAll(optPhases);
 
         assertTrue(usedPhases.equals(allPhases), "Compare events expected and received"

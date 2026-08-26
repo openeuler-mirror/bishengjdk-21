@@ -31,6 +31,7 @@
 #include "memory/padded.hpp"
 #include "utilities/macros.hpp"
 
+#ifndef AARCH64
 class G1RedirtyCardsQueueSet;
 
 // A thread-local qset and queue.  It provides an uncontended staging
@@ -93,4 +94,5 @@ public:
   BufferNodeList take_all_completed_buffers();
 };
 
+#endif // !AARCH64
 #endif // SHARE_GC_G1_G1REDIRTYCARDSQUEUE_HPP

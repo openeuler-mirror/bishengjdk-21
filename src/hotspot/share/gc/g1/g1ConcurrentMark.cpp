@@ -28,12 +28,20 @@
 #include "gc/g1/g1BarrierSet.hpp"
 #include "gc/g1/g1BatchedTask.hpp"
 #include "gc/g1/g1CardSetMemory.hpp"
+#ifdef AARCH64
+#include "gc/g1/g1CardTableClaimTable.inline.hpp"
+#endif /* AARCH64 */
 #include "gc/g1/g1CollectedHeap.inline.hpp"
 #include "gc/g1/g1CollectorState.hpp"
 #include "gc/g1/g1ConcurrentMark.inline.hpp"
 #include "gc/g1/g1ConcurrentMarkThread.inline.hpp"
 #include "gc/g1/g1ConcurrentRebuildAndScrub.hpp"
+#ifndef AARCH64
 #include "gc/g1/g1DirtyCardQueue.hpp"
+#else /* AARCH64 */
+#include "gc/g1/g1ConcurrentRefine.hpp"
+#include "gc/g1/g1HRPrinter.hpp"
+#endif /* AARCH64 */
 #include "gc/g1/g1HeapVerifier.hpp"
 #include "gc/g1/g1OopClosures.inline.hpp"
 #include "gc/g1/g1Policy.hpp"
@@ -323,6 +331,17 @@ uint G1CMRootMemRegions::num_root_regions() const {
   return (uint)_num_root_regions;
 }
 
+#ifdef AARCH64
+bool G1CMRootMemRegions::contains(const MemRegion mr) const {
+  for (uint i = 0; i < _num_root_regions; i++) {
+    if (_root_regions[i].equals(mr)) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif /* AARCH64 */
+
 void G1CMRootMemRegions::notify_scan_done() {
   MutexLocker x(RootRegionScan_lock, Mutex::_no_safepoint_check_flag);
   _scan_in_progress = false;
@@ -374,7 +393,11 @@ G1ConcurrentMark::G1ConcurrentMark(G1CollectedHeap* g1h,
 
   // _finger set in set_non_marking_state
 
+#ifndef AARCH64
   _worker_id_offset(G1DirtyCardQueueSet::num_par_ids() + G1ConcRefinementThreads),
+#else /* AARCH64 */
+  _worker_id_offset(G1ConcRefinementThreads), // The refinement control thread does not refine cards, so it's just the worker threads.
+#endif /* AARCH64 */
   _max_num_tasks(MAX2(ConcGCThreads, ParallelGCThreads)),
   // _num_active_tasks set in set_non_marking_state()
   // _tasks set inside the constructor
@@ -992,6 +1015,12 @@ void G1ConcurrentMark::add_root_region(HeapRegion* r) {
   root_regions()->add(r->top_at_mark_start(), r->top());
 }
 
+#ifdef AARCH64
+bool G1ConcurrentMark::is_root_region(HeapRegion* r) {
+  return root_regions()->contains(MemRegion(r->top_at_mark_start(), r->top()));
+}
+#endif /* AARCH64 */
+
 void G1ConcurrentMark::root_region_scan_abort_and_wait() {
   root_regions()->abort();
   root_regions()->wait_until_scan_finished();
@@ -1039,7 +1068,11 @@ void G1ConcurrentMark::mark_from_roots() {
   // worker threads may currently exist and more may not be
   // available.
   active_workers = _concurrent_workers->set_active_workers(active_workers);
+#ifndef AARCH64
   log_info(gc, task)("Using %u workers of %u for marking", active_workers, _concurrent_workers->max_workers());
+#else /* AARCH64 */
+  log_info(gc, task)("Concurrent Mark Using %u of %u Workers", active_workers, _concurrent_workers->max_workers());
+#endif /* AARCH64 */
 
   // Parallel task terminator is set in "set_concurrency_and_phase()"
   set_concurrency_and_phase(active_workers, true /* concurrent */);
@@ -1352,6 +1385,10 @@ class G1ReclaimEmptyRegionsTask : public WorkerTask {
                       hr->hrm_index(), hr->get_short_type_str(), p2i(hr->bottom()));
         _freed_bytes += hr->used();
         hr->set_containing_set(nullptr);
+#ifdef AARCH64
+        _g1h->concurrent_refine()->notify_region_reclaimed(hr);
+        hr->clear_both_card_tables();
+#endif /* AARCH64 */
         if (hr->is_humongous()) {
           _humongous_regions_removed++;
           _g1h->free_humongous_region(hr, _local_cleanup_list);
@@ -1359,7 +1396,9 @@ class G1ReclaimEmptyRegionsTask : public WorkerTask {
           _old_regions_removed++;
           _g1h->free_region(hr, _local_cleanup_list);
         }
+#ifndef AARCH64
         hr->clear_cardtable();
+#endif /* !AARCH64 */
         _g1h->concurrent_mark()->clear_statistics(hr);
       }
 

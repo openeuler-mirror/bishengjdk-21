@@ -117,6 +117,39 @@ $(eval $(call SetupJavaCompilation, $(MODULE), \
 
 TARGETS += $($(MODULE))
 
+################################################################################
+# Compile replacement sources under their final binary names and store the
+# resulting class files as private bytecode resources.
+
+ifeq ($(call isTargetCpuArch, aarch64)+$(MODULE), true+java.base)
+  CLASSDATA_SRC_DIR := $(TOPDIR)/test/jdk/jdk/internal/enhancement/classdata
+  CLASSDATA_SOURCES := $(call FindFiles, $(CLASSDATA_SRC_DIR), *.java)
+  CLASSDATA_SOURCE_DIRS := $(sort $(shell $(FIND) $(CLASSDATA_SRC_DIR) -type d))
+  CLASSDATA_SUPPORT_DIR := $(SUPPORT_OUTPUTDIR)/enhancement/classdata/$(MODULE)
+  CLASSDATA_OUTPUT_DIR := $(JDK_OUTPUTDIR)/modules/$(MODULE)/jdk/internal/enhancement/classdata
+  CLASSDATA_MARKER := $(JDK_OUTPUTDIR)/modules/$(MODULE)/_the.$(MODULE)_classdata
+
+  $(CLASSDATA_MARKER): $(CLASSDATA_SOURCES) $(CLASSDATA_SOURCE_DIRS) \
+      $(TOPDIR)/make/CompileJavaModules.gmk $($(MODULE)_COMPILE_TARGET)
+	$(ECHO) Compiling private bytecode resources for $(MODULE)
+	$(RM) -r $(CLASSDATA_SUPPORT_DIR) $(CLASSDATA_OUTPUT_DIR)
+	$(MKDIR) -p $(CLASSDATA_SUPPORT_DIR) $(CLASSDATA_OUTPUT_DIR)
+	$($(MODULE)_JAVAC_CMD) $($(MODULE)_FLAGS) \
+	    --patch-module $(MODULE)=$(call PathList, $(CLASSDATA_SRC_DIR)) \
+	    -d $(CLASSDATA_SUPPORT_DIR) \
+	    $(CLASSDATA_SOURCES)
+	for f in `$(FIND) $(CLASSDATA_SUPPORT_DIR) -type f -name '*.class'`; do \
+	  p=$${f#$(CLASSDATA_SUPPORT_DIR)/}; \
+	  p=$${p#$(MODULE)/}; \
+	  d=$(CLASSDATA_OUTPUT_DIR)/$${p%.class}.classdata; \
+	  $(MKDIR) -p `$(DIRNAME) $$d`; \
+	  $(CP) $$f $$d; \
+	done
+	$(TOUCH) $@
+
+  TARGETS += $(CLASSDATA_MARKER)
+endif
+
 # Declare dependencies between java compilations of different modules.
 # Since the other modules are declared in different invocations of this file,
 # use the macro to find the correct target file to depend on.

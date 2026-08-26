@@ -213,8 +213,29 @@ bool C2Compiler::is_intrinsic_supported(const methodHandle& method) {
   case vmIntrinsics::_equalsU:
     if (!Matcher::match_rule_supported(Op_StrEquals)) return false;
     break;
+  case vmIntrinsics::_equalsIgnoreCaseLL:
+    if (StubRoutines::string_equals_ignore_case_ll() == nullptr) return false;
+    break;
+  case vmIntrinsics::_equalsIgnoreCaseLU:
+    if (StubRoutines::string_equals_ignore_case_lu() == nullptr) return false;
+    break;
+  case vmIntrinsics::_equalsIgnoreCaseUU:
+    if (StubRoutines::string_equals_ignore_case_uu() == nullptr) return false;
+    break;
   case vmIntrinsics::_vectorizedHashCode:
     if (!Matcher::match_rule_supported(Op_VectorizedHashCode)) return false;
+    break;
+  case vmIntrinsics::_stringLatin1ToLowerCase:
+    if (StubRoutines::string_case_latin1_lower() == nullptr) return false;
+    break;
+  case vmIntrinsics::_stringLatin1ToUpperCase:
+    if (StubRoutines::string_case_latin1_upper() == nullptr) return false;
+    break;
+  case vmIntrinsics::_stringUTF16ToLowerCase:
+    if (StubRoutines::string_case_utf16_lower() == nullptr) return false;
+    break;
+  case vmIntrinsics::_stringUTF16ToUpperCase:
+    if (StubRoutines::string_case_utf16_upper() == nullptr) return false;
     break;
   case vmIntrinsics::_equalsB:
   case vmIntrinsics::_equalsC:

@@ -81,4 +81,42 @@ TEST_VM(AssemblerAArch64, validate) {
   BufferBlob::free(b);
 }
 
+TEST_VM(AssemblerAArch64, sve2_match) {
+  BufferBlob* b = BufferBlob::create("aarch64SVE2MatchTest", 128);
+  CodeBuffer code(b);
+  Assembler _masm(&code);
+  address entry = __ pc();
+
+  __ sve_match(p1, __ B, p0, z2, z3);
+  __ sve_nmatch(p4, __ B, p5, z6, z7);
+  __ sve_match(p6, __ H, p3, z30, z17);
+  __ sve_nmatch(p7, __ H, p7, z31, z0);
+
+  static const unsigned int insns[] = {
+    0x45238041, // match  p1.b, p0/z, z2.b, z3.b
+    0x452794d4, // nmatch p4.b, p5/z, z6.b, z7.b
+    0x45718fc6, // match  p6.h, p3/z, z30.h, z17.h
+    0x45609ff7, // nmatch p7.h, p7/z, z31.h, z0.h
+  };
+  asm_check((const unsigned int*)entry, insns, sizeof insns / sizeof insns[0]);
+  BufferBlob::free(b);
+}
+
+TEST_VM(AssemblerAArch64, sve_narrow_gather) {
+  BufferBlob* b = BufferBlob::create("aarch64SVENarrowGatherTest", 128);
+  CodeBuffer code(b);
+  Assembler _masm(&code);
+  address entry = __ pc();
+
+  __ sve_ld1b_gather(z0, p0, r0, z1);
+  __ sve_ld1h_gather(z2, p1, r3, z4);
+
+  static const unsigned int insns[] = {
+    0x84014000, // ld1b {z0.s}, p0/z, [x0, z1.s, uxtw]
+    0x84a44462, // ld1h {z2.s}, p1/z, [x3, z4.s, uxtw #1]
+  };
+  asm_check((const unsigned int*)entry, insns, sizeof insns / sizeof insns[0]);
+  BufferBlob::free(b);
+}
+
 #endif  // AARCH64

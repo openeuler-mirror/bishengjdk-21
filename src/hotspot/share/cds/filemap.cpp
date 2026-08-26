@@ -33,6 +33,9 @@
 #include "cds/heapShared.hpp"
 #include "cds/metaspaceShared.hpp"
 #include "classfile/altHashing.hpp"
+#ifdef AARCH64
+#include "classfile/bytecodeEnhancement.hpp"
+#endif
 #include "classfile/classFileStream.hpp"
 #include "classfile/classLoader.hpp"
 #include "classfile/classLoader.inline.hpp"
@@ -2008,6 +2011,12 @@ bool FileMapInfo::can_use_heap_region() {
   if (!has_heap_region()) {
     return false;
   }
+#ifdef AARCH64
+  if (BytecodeEnhancement::is_enabled()) {
+    log_info(cds, heap)("Archived heap is not used because BytecodeEnhancement is configured");
+    return false;
+  }
+#endif
   if (JvmtiExport::should_post_class_file_load_hook() && JvmtiExport::has_early_class_hook_env()) {
     ShouldNotReachHere(); // CDS should have been disabled.
     // The archived objects are mapped at JVM start-up, but we don't know if

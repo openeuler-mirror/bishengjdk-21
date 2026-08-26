@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
 package sun.hotspot.tools.ctw;
 
 import jdk.test.lib.Asserts;
+import jdk.test.lib.Platform;
 import jdk.test.lib.Utils;
 import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.util.Pair;
@@ -304,7 +305,14 @@ public class CtwRunner {
                 "-XX:+StressCCP",
                 "-XX:+StressIncrementalInlining",
                 // StressSeed is uint
-                "-XX:StressSeed=" + rng.nextInt(Integer.MAX_VALUE)));
+                "-XX:StressSeed=" + rng.nextInt(Integer.MAX_VALUE),
+                // Do not fail on huge methods where StressGCM makes register
+                // allocation allocate lots of memory
+                "-XX:CompileCommand=memlimit,*.*,0"));
+
+        if (Platform.isAArch64()) {
+            Args.add("-XX:+StressMacroExpansion");
+        }
 
         for (String arg : CTW_EXTRA_ARGS.split(",")) {
             Args.add(arg);

@@ -31,6 +31,7 @@ is:
 * 2: more detail, including after loop opts
 * 3: even more detail
 * 4: prints graph after parsing every bytecode (very slow)
+* 5: on AArch64, additionally prints graph after every macro expansion step (very slow)
 
 By default the JVM expects that it will connect to a visualizer on the local
 host on port 4444. This can be configured using the options

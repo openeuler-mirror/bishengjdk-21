@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,10 @@ class oopDesc;
 class JavaThread;
 
 class G1BarrierSetRuntime: public AllStatic {
+#ifdef AARCH64
+private:
+  static void clone(oopDesc* src, oopDesc* dst, size_t size);
+#endif /* AARCH64 */
 public:
   using CardValue = G1CardTable::CardValue;
 
@@ -45,7 +49,13 @@ public:
 
   // C2 slow-path runtime calls.
   static void write_ref_field_pre_entry(oopDesc* orig, JavaThread *thread);
+#ifndef AARCH64
   static void write_ref_field_post_entry(volatile CardValue* card_addr, JavaThread* thread);
+#endif /* !AARCH64 */
+
+#ifdef AARCH64
+  static address clone_addr();
+#endif /* AARCH64 */
 };
 
 #endif // SHARE_GC_G1_G1BARRIERSETRUNTIME_HPP

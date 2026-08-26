@@ -111,6 +111,9 @@ Mutex*   FreeList_lock                = nullptr;
 Mutex*   OldSets_lock                 = nullptr;
 Mutex*   Uncommit_lock                = nullptr;
 Monitor* RootRegionScan_lock          = nullptr;
+#ifdef AARCH64
+Mutex*   G1ReviseYoungLength_lock     = nullptr;
+#endif /* AARCH64 */
 
 Mutex*   Management_lock              = nullptr;
 Monitor* MonitorDeflation_lock        = nullptr;
@@ -358,6 +361,9 @@ void mutex_init() {
   if (UseG1GC) {
     MUTEX_DEFL(G1OldGCCount_lock            , PaddedMonitor, Threads_lock, true);
     MUTEX_DEFL(G1RareEvent_lock             , PaddedMutex  , Threads_lock, true);
+#ifdef AARCH64
+    MUTEX_DEFL(G1ReviseYoungLength_lock     , PaddedMutex  , Threads_lock, true);
+#endif /* AARCH64 */
   }
 
   MUTEX_DEFL(CompileTaskAlloc_lock          , PaddedMutex  ,  MethodCompileQueue_lock);

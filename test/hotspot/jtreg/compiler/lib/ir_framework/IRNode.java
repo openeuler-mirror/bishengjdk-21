@@ -353,6 +353,11 @@ public class IRNode {
         beforeMatchingNameRegex(CALL, "Call.*Java");
     }
 
+    public static final String CALL_OF = COMPOSITE_PREFIX + "CALL_OF" + POSTFIX;
+    static {
+        callOfNodes(CALL_OF, "Call.*");
+    }
+
     public static final String CALL_OF_METHOD = COMPOSITE_PREFIX + "CALL_OF_METHOD" + POSTFIX;
     static {
         callOfNodes(CALL_OF_METHOD, "Call.*Java");
@@ -529,6 +534,92 @@ public class IRNode {
     public static final String FMA_VD = VECTOR_PREFIX + "FMA_VD" + POSTFIX;
     static {
         vectorNode(FMA_VD, "FmaVD", TYPE_DOUBLE);
+    }
+
+    public static final String G1_COMPARE_AND_EXCHANGE_N_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_COMPARE_AND_EXCHANGE_N_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1CompareAndExchangeN\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_COMPARE_AND_EXCHANGE_N_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_COMPARE_AND_EXCHANGE_P_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_COMPARE_AND_EXCHANGE_P_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1CompareAndExchangeP\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_COMPARE_AND_EXCHANGE_P_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_COMPARE_AND_SWAP_N_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_COMPARE_AND_SWAP_N_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1CompareAndSwapN\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_COMPARE_AND_SWAP_N_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_COMPARE_AND_SWAP_P_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_COMPARE_AND_SWAP_P_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1CompareAndSwapP\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_COMPARE_AND_SWAP_P_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_ENCODE_P_AND_STORE_N = PREFIX + "G1_ENCODE_P_AND_STORE_N" + POSTFIX;
+    static {
+        machOnlyNameRegex(G1_ENCODE_P_AND_STORE_N, "g1EncodePAndStoreN");
+    }
+
+    public static final String G1_ENCODE_P_AND_STORE_N_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_ENCODE_P_AND_STORE_N_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1EncodePAndStoreN\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_ENCODE_P_AND_STORE_N_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_GET_AND_SET_N_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_GET_AND_SET_N_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1GetAndSetN\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_GET_AND_SET_N_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_GET_AND_SET_P_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_GET_AND_SET_P_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1GetAndSetP\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_GET_AND_SET_P_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_LOAD_N = PREFIX + "G1_LOAD_N" + POSTFIX;
+    static {
+        machOnlyNameRegex(G1_LOAD_N, "g1LoadN");
+    }
+
+    public static final String G1_LOAD_N_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_LOAD_N_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1LoadN\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_LOAD_N_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_LOAD_P_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_LOAD_P_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1LoadP\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_LOAD_P_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_STORE_N = PREFIX + "G1_STORE_N" + POSTFIX;
+    static {
+        machOnlyNameRegex(G1_STORE_N, "g1StoreN");
+    }
+
+    public static final String G1_STORE_N_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_STORE_N_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1StoreN\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_STORE_N_WITH_BARRIER_FLAG, regex);
+    }
+
+    public static final String G1_STORE_P = PREFIX + "G1_STORE_P" + POSTFIX;
+    static {
+        machOnlyNameRegex(G1_STORE_P, "g1StoreP");
+    }
+
+    public static final String G1_STORE_P_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "G1_STORE_P_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "g1StoreP\\S*" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(G1_STORE_P_WITH_BARRIER_FLAG, regex);
     }
 
     public static final String IF = PREFIX + "IF" + POSTFIX;
@@ -792,6 +883,11 @@ public class IRNode {
         vectorNode(LSHIFT_VL, "LShiftVL", TYPE_LONG);
     }
 
+    public static final String MACH_TEMP = PREFIX + "MACH_TEMP" + POSTFIX;
+    static {
+        machOnlyNameRegex(MACH_TEMP, "MachTemp");
+    }
+
     public static final String MACRO_LOGIC_V = PREFIX + "MACRO_LOGIC_V" + POSTFIX;
     static {
         afterBarrierExpansionToBeforeMatching(MACRO_LOGIC_V, "MacroLogicV");
@@ -1030,6 +1126,12 @@ public class IRNode {
     public static final String NULL_CHECK_TRAP = PREFIX + "NULL_CHECK_TRAP" + POSTFIX;
     static {
         trapNodes(NULL_CHECK_TRAP,"null_check");
+    }
+
+    public static final String OOPMAP_WITH = COMPOSITE_PREFIX + "OOPMAP_WITH" + POSTFIX;
+    static {
+        String regex = "(#\\s*OopMap\\s*\\{.*" + IS_REPLACED + ".*\\})";
+        optoOnly(OOPMAP_WITH, regex);
     }
 
     public static final String OR_VB = VECTOR_PREFIX + "OR_VB" + POSTFIX;
@@ -2053,6 +2155,12 @@ public class IRNode {
         machOnly(Z_STORE_P_WITH_BARRIER_FLAG, regex);
     }
 
+    public static final String Z_COMPARE_AND_SWAP_P_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "Z_COMPARE_AND_SWAP_P_WITH_BARRIER_FLAG" + POSTFIX;
+    static {
+        String regex = START + "zCompareAndSwapP" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
+        machOnly(Z_COMPARE_AND_SWAP_P_WITH_BARRIER_FLAG, regex);
+    }
+
     public static final String Z_GET_AND_SET_P_WITH_BARRIER_FLAG = COMPOSITE_PREFIX + "Z_GET_AND_SET_P_WITH_BARRIER_FLAG" + POSTFIX;
     static {
         String regex = START + "(zXChgP)|(zGetAndSetP\\S*)" + MID + "barrier\\(\\s*" + IS_REPLACED + "\\s*\\)" + END;
@@ -2150,7 +2258,7 @@ public class IRNode {
      */
     private static void fromMacroToBeforeMatching(String irNodePlaceholder, String regex) {
         IR_NODE_MAPPINGS.put(irNodePlaceholder, new SinglePhaseRangeEntry(CompilePhase.PRINT_IDEAL, regex,
-                                                                          CompilePhase.MACRO_EXPANSION,
+                                                                          CompilePhase.AFTER_MACRO_EXPANSION,
                                                                           CompilePhase.BEFORE_MATCHING));
     }
 

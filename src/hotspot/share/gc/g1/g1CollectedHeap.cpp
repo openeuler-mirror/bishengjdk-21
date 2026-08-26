@@ -41,7 +41,9 @@
 #include "gc/g1/g1ConcurrentRefine.hpp"
 #include "gc/g1/g1ConcurrentRefineThread.hpp"
 #include "gc/g1/g1ConcurrentMarkThread.inline.hpp"
+#ifndef AARCH64
 #include "gc/g1/g1DirtyCardQueue.hpp"
+#endif /* ! AARCH64 */
 #include "gc/g1/g1EvacStats.inline.hpp"
 #include "gc/g1/g1FullCollector.hpp"
 #include "gc/g1/g1GCCounters.hpp"
@@ -59,9 +61,14 @@
 #include "gc/g1/g1ParScanThreadState.inline.hpp"
 #include "gc/g1/g1PeriodicGCTask.hpp"
 #include "gc/g1/g1Policy.hpp"
+#ifndef AARCH64
 #include "gc/g1/g1RedirtyCardsQueue.hpp"
+#endif /* ! AARCH64 */
 #include "gc/g1/g1RegionToSpaceMapper.hpp"
 #include "gc/g1/g1RemSet.hpp"
+#ifdef AARCH64
+#include "gc/g1/g1ReviseYoungLengthTask.hpp"
+#endif /* AARCH64 */
 #include "gc/g1/g1RootClosures.hpp"
 #include "gc/g1/g1RootProcessor.hpp"
 #include "gc/g1/g1SATBMarkQueueSet.hpp"
@@ -111,6 +118,9 @@
 #include "runtime/init.hpp"
 #include "runtime/java.hpp"
 #include "runtime/orderAccess.hpp"
+#ifdef AARCH64
+#include "runtime/threads.hpp"
+#endif /* AARCH64 */
 #include "runtime/threadSMR.hpp"
 #include "runtime/vmThread.hpp"
 #include "utilities/align.hpp"
@@ -149,7 +159,7 @@ void G1CollectedHeap::run_batch_task(G1BatchedTask* cl) {
   workers()->run_task(cl, num_workers);
 }
 
-uint G1CollectedHeap::get_chunks_per_region() {
+static uint get_chunks_per_region_for_scan_impl() {
   uint log_region_size = HeapRegion::LogOfHRGrainBytes;
   // Limit the expected input values to current known possible values of the
   // (log) region size. Adjust as necessary after testing if changing the permissible
@@ -158,6 +168,30 @@ uint G1CollectedHeap::get_chunks_per_region() {
          "expected value in [20,29], but got %u", log_region_size);
   return 1u << (log_region_size / 2 - 4);
 }
+
+#ifndef AARCH64
+uint G1CollectedHeap::get_chunks_per_region() {
+  return get_chunks_per_region_for_scan_impl();
+}
+#else /* AARCH64 */
+uint G1CollectedHeap::get_chunks_per_region_for_scan() {
+  return get_chunks_per_region_for_scan_impl();
+}
+
+#endif /* AARCH64 */
+#ifdef AARCH64
+uint G1CollectedHeap::get_chunks_per_region_for_merge() {
+  uint log_region_size = HeapRegion::LogOfHRGrainBytes;
+  // Limit the expected input values to current known possible values of the
+  // (log) region size. Adjust as necessary after testing if changing the permissible
+  // values for region size.
+  assert(log_region_size >= 20 && log_region_size <= 29,
+         "expected value in [20,29], but got %u", log_region_size);
+
+  uint half_log_region_size = (log_region_size + 1) / 2;
+  return 1 << (half_log_region_size - 9);
+}
+#endif /* AARCH64 */
 
 HeapRegion* G1CollectedHeap::new_heap_region(uint hrs_index,
                                              MemRegion mr) {
@@ -668,7 +702,9 @@ inline HeapWord* G1CollectedHeap::attempt_allocation(size_t min_word_size,
   assert_heap_not_locked();
   if (result != nullptr) {
     assert(*actual_word_size != 0, "Actual size must have been set here");
+#ifndef AARCH64
     dirty_young_block(result, *actual_word_size);
+#endif /* ! AARCH64 */
   } else {
     *actual_word_size = 0;
   }
@@ -904,11 +940,35 @@ void G1CollectedHeap::prepare_for_mutator_after_full_collection() {
 }
 
 void G1CollectedHeap::abort_refinement() {
+#ifndef AARCH64
   // Discard all remembered set updates and reset refinement statistics.
   G1BarrierSet::dirty_card_queue_set().abandon_logs_and_stats();
   assert(G1BarrierSet::dirty_card_queue_set().num_cards() == 0,
          "DCQS should be empty");
   concurrent_refine()->get_and_reset_refinement_stats();
+#else /* AARCH64 */
+  G1ConcurrentRefineSweepState& sweep_state = concurrent_refine()->sweep_state();
+  if (sweep_state.is_in_progress()) {
+
+    if (!sweep_state.are_java_threads_synched()) {
+      // Synchronize Java threads with global card table that has already been swapped.
+      class SwapThreadCardTableClosure : public ThreadClosure {
+      public:
+
+        virtual void do_thread(Thread* t) {
+          G1BarrierSet* bs = G1BarrierSet::g1_barrier_set();
+          bs->update_card_table_base(t);
+        }
+      } cl;
+      Threads::java_threads_do(&cl);
+    }
+
+    // Record any available refinement statistics.
+    policy()->record_refinement_stats(sweep_state.stats());
+    sweep_state.complete_work(false /* concurrent */, false /* print_log */);
+  }
+  sweep_state.reset_stats();
+#endif /* AARCH64 */
 }
 
 void G1CollectedHeap::verify_after_full_collection() {
@@ -920,6 +980,9 @@ void G1CollectedHeap::verify_after_full_collection() {
   }
   _hrm.verify_optional();
   _verifier->verify_region_sets_optional();
+#ifdef AARCH64
+  _verifier->verify_card_tables_clean(true /* both_card_tables */);
+#endif /* AARCH64 */
   _verifier->verify_after_gc();
   _verifier->verify_bitmap_clear(false /* above_tams_only */);
 
@@ -1296,8 +1359,19 @@ G1CollectedHeap::G1CollectedHeap() :
   _service_thread(nullptr),
   _periodic_gc_task(nullptr),
   _free_arena_memory_task(nullptr),
+#ifdef AARCH64
+  _revise_young_length_task(nullptr),
+#endif /* AARCH64 */
   _workers(nullptr),
+#ifndef AARCH64
   _card_table(nullptr),
+#else /* AARCH64 */
+  _refinement_epoch(0),
+  _last_synchronized_start(0),
+  _last_refinement_epoch_start(0),
+  _yield_duration_in_refinement_epoch(0),
+  _last_safepoint_refinement_epoch(0),
+#endif /* AARCH64 */
   _collection_pause_end(Ticks::now()),
   _soft_ref_policy(),
   _old_set("Old Region Set", new OldRegionSetChecker()),
@@ -1397,7 +1471,11 @@ G1RegionToSpaceMapper* G1CollectedHeap::create_aux_memory_mapper(const char* des
 
 jint G1CollectedHeap::initialize_concurrent_refinement() {
   jint ecode = JNI_OK;
+#ifndef AARCH64
   _cr = G1ConcurrentRefine::create(policy(), &ecode);
+#else /* AARCH64 */
+  _cr = G1ConcurrentRefine::create(this, &ecode);
+#endif /* AARCH64 */
   return ecode;
 }
 
@@ -1450,10 +1528,18 @@ jint G1CollectedHeap::initialize() {
   initialize_reserved_region(heap_rs);
 
   // Create the barrier set for the entire reserved region.
+#ifndef AARCH64
   G1CardTable* ct = new G1CardTable(heap_rs.region());
   G1BarrierSet* bs = new G1BarrierSet(ct);
+#else /* AARCH64 */
+  G1CardTable* card_table = new G1CardTable(_reserved);
+  G1CardTable* refinement_table = new G1CardTable(_reserved);
+
+  G1BarrierSet* bs = new G1BarrierSet(card_table, refinement_table);
+#endif /* AARCH64 */
   bs->initialize();
   assert(bs->is_a(BarrierSet::G1BarrierSet), "sanity");
+#ifndef AARCH64
   BarrierSet::set_barrier_set(bs);
   _card_table = ct;
 
@@ -1462,6 +1548,7 @@ jint G1CollectedHeap::initialize() {
     satbqs.set_process_completed_buffers_threshold(G1SATBProcessCompletedThreshold);
     satbqs.set_buffer_enqueue_threshold_percentage(G1SATBBufferEnqueueingThresholdPercent);
   }
+#endif /* ! AARCH64 */
 
   // Create space mappers.
   size_t page_size = heap_rs.page_size();
@@ -1496,12 +1583,33 @@ jint G1CollectedHeap::initialize() {
                              G1CardTable::compute_size(heap_rs.size() / HeapWordSize),
                              G1CardTable::heap_map_factor());
 
+#ifdef AARCH64
+  G1RegionToSpaceMapper* refinement_cards_storage =
+    create_aux_memory_mapper("Refinement Card Table",
+                             G1CardTable::compute_size(heap_rs.size() / HeapWordSize),
+                             G1CardTable::heap_map_factor());
+
+#endif /* AARCH64 */
   size_t bitmap_size = G1CMBitMap::compute_size(heap_rs.size());
   G1RegionToSpaceMapper* bitmap_storage =
     create_aux_memory_mapper("Mark Bitmap", bitmap_size, G1CMBitMap::heap_map_factor());
 
+#ifndef AARCH64
   _hrm.initialize(heap_storage, bitmap_storage, bot_storage, cardtable_storage);
   _card_table->initialize(cardtable_storage);
+#else /* AARCH64 */
+  _hrm.initialize(heap_storage, bitmap_storage, bot_storage, cardtable_storage, refinement_cards_storage);
+  card_table->initialize(cardtable_storage);
+  refinement_table->initialize(refinement_cards_storage);
+
+  BarrierSet::set_barrier_set(bs);
+
+  {
+    G1SATBMarkQueueSet& satbqs = bs->satb_mark_queue_set();
+    satbqs.set_process_completed_buffers_threshold(G1SATBProcessCompletedThreshold);
+    satbqs.set_buffer_enqueue_threshold_percentage(G1SATBBufferEnqueueingThresholdPercent);
+  }
+#endif /* AARCH64 */
 
   // 6843694 - ensure that the maximum region index can fit
   // in the remembered set structures.
@@ -1513,8 +1621,13 @@ jint G1CollectedHeap::initialize() {
   guarantee((uintptr_t)(heap_rs.base()) >= G1CardTable::card_size(), "Java heap must not start within the first card.");
   G1FromCardCache::initialize(max_reserved_regions());
   // Also create a G1 rem set.
+#ifndef AARCH64
   _rem_set = new G1RemSet(this, _card_table);
   _rem_set->initialize(max_reserved_regions());
+#else /* AARCH64 */
+  _rem_set = new G1RemSet(this);
+  _rem_set->initialize(max_regions());
+#endif /* AARCH64 */
 
   size_t max_cards_per_region = ((size_t)1 << (sizeof(CardIdx_t)*BitsPerByte-1)) - 1;
   guarantee(HeapRegion::CardsPerRegion > 0, "make sure it's initialized");
@@ -1572,6 +1685,13 @@ jint G1CollectedHeap::initialize() {
   _free_arena_memory_task = new G1MonotonicArenaFreeMemoryTask("Card Set Free Memory Task");
   _service_thread->register_task(_free_arena_memory_task);
 
+#ifdef AARCH64
+  if (policy()->use_adaptive_young_list_length()) {
+    _revise_young_length_task = new G1ReviseYoungLengthTask("Revise Young Length List Task");
+    _service_thread->register_task(_revise_young_length_task);
+  }
+
+#endif /* AARCH64 */
   // Here we allocate the dummy HeapRegion that is required by the
   // G1AllocRegion class.
   HeapRegion* dummy_region = _hrm.get_dummy_region();
@@ -1617,12 +1737,41 @@ void G1CollectedHeap::stop() {
 
 void G1CollectedHeap::safepoint_synchronize_begin() {
   SuspendibleThreadSet::synchronize();
+#ifdef AARCH64
+
+  _last_synchronized_start = os::elapsed_counter();
+#endif /* AARCH64 */
 }
 
 void G1CollectedHeap::safepoint_synchronize_end() {
+#ifdef AARCH64
+  jlong now = os::elapsed_counter();
+  jlong synchronize_duration = now - _last_synchronized_start;
+
+  if (_last_safepoint_refinement_epoch == _refinement_epoch) {
+    _yield_duration_in_refinement_epoch += synchronize_duration;
+  } else {
+    _last_refinement_epoch_start = now;
+    _last_safepoint_refinement_epoch = _refinement_epoch;
+    _yield_duration_in_refinement_epoch = 0;
+  }
+
+#endif /* AARCH64 */
   SuspendibleThreadSet::desynchronize();
 }
 
+#ifdef AARCH64
+void G1CollectedHeap::set_last_refinement_epoch_start(jlong epoch_start, jlong last_yield_duration) {
+  _last_refinement_epoch_start = epoch_start;
+  guarantee(_yield_duration_in_refinement_epoch >= last_yield_duration, "should be");
+  _yield_duration_in_refinement_epoch -= last_yield_duration;
+}
+
+jlong G1CollectedHeap::yield_duration_in_refinement_epoch() {
+  return _yield_duration_in_refinement_epoch;
+}
+
+#endif /* AARCH64 */
 void G1CollectedHeap::post_initialize() {
   CollectedHeap::post_initialize();
   ref_processing_init();
@@ -2481,6 +2630,10 @@ void G1CollectedHeap::gc_epilogue(bool full) {
 
   _free_arena_memory_task->notify_new_stats(&_young_gen_card_set_stats,
                                             &_collection_set_candidates_card_set_stats);
+#ifdef AARCH64
+
+  _refinement_epoch++;
+#endif /* AARCH64 */
 }
 
 uint G1CollectedHeap::uncommit_regions(uint region_limit) {
@@ -2598,7 +2751,9 @@ void G1CollectedHeap::verify_before_young_collection(G1HeapVerifier::G1VerifyTyp
   Ticks start = Ticks::now();
   _verifier->prepare_for_verify();
   _verifier->verify_region_sets_optional();
+#ifndef AARCH64
   _verifier->verify_dirty_young_regions();
+#endif /* ! AARCH64 */
   _verifier->verify_before_gc();
   verify_numa_regions("GC Start");
   phase_times()->record_verify_before_time_ms((Ticks::now() - start).seconds() * MILLIUNITS);
@@ -2615,6 +2770,12 @@ void G1CollectedHeap::verify_after_young_collection(G1HeapVerifier::G1VerifyType
   _verifier->verify_after_gc();
   verify_numa_regions("GC End");
   _verifier->verify_region_sets_optional();
+#ifdef AARCH64
+  if (collector_state()->in_concurrent_start_gc()) {
+    log_debug(gc, verify)("Marking state");
+    _verifier->verify_marking_state();
+  }
+#endif /* AARCH64 */
   phase_times()->record_verify_after_time_ms((Ticks::now() - start).seconds() * MILLIUNITS);
 }
 
@@ -2860,7 +3021,21 @@ void G1CollectedHeap::free_region(HeapRegion* hr, FreeRegionList* free_list) {
   if (free_list != nullptr) {
     free_list->add_ordered(hr);
   }
+#ifdef AARCH64
+  if (VerifyDuringGC) {
+    // Card and refinement table must be clear for freed regions.
+    card_table()->verify_region(MemRegion(hr->bottom(), hr->end()), G1CardTable::clean_card_val(), true);
+    refinement_table()->verify_region(MemRegion(hr->bottom(), hr->end()), G1CardTable::clean_card_val(), true);
+  }
+#endif /* AARCH64 */
 }
+
+#ifdef AARCH64
+void G1CollectedHeap::retain_region(HeapRegion* hr) {
+  MutexLocker x(G1RareEvent_lock, Mutex::_no_safepoint_check_flag);
+  collection_set()->candidates()->add_retained_region_unsorted(hr);
+}
+#endif /* AARCH64 */
 
 void G1CollectedHeap::free_humongous_region(HeapRegion* hr,
                                             FreeRegionList* free_list) {
@@ -3190,9 +3365,11 @@ void G1CollectedHeap::mark_evac_failure_object(uint worker_id, const oop obj, si
   assert(!_cm->is_marked_in_bitmap(obj), "must be");
 
   _cm->raw_mark_in_bitmap(obj);
+#ifndef AARCH64
   if (collector_state()->in_concurrent_start_gc()) {
     _cm->add_to_liveness(worker_id, obj, obj_size);
   }
+#endif /* ! AARCH64 */
 }
 
 // Optimized nmethod scanning

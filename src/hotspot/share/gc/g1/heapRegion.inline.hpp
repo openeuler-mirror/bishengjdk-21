@@ -302,7 +302,13 @@ inline void HeapRegion::reset_parsable_bottom() {
 
 inline void HeapRegion::note_start_of_marking() {
   assert(top_at_mark_start() == bottom(), "CA region's TAMS must always be at bottom");
-  if (is_old_or_humongous()) {
+  bool should_update_tams = is_old_or_humongous();
+#ifdef AARCH64
+  should_update_tams = should_update_tams &&
+                       !is_collection_set_candidate() &&
+                       !in_collection_set();
+#endif
+  if (should_update_tams) {
     set_top_at_mark_start(top());
   }
 }

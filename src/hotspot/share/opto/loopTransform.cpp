@@ -24,6 +24,10 @@
 
 #include "precompiled.hpp"
 #include "compiler/compileLog.hpp"
+#ifdef AARCH64
+#include "gc/shared/barrierSet.hpp"
+#include "gc/shared/c2/barrierSetC2.hpp"
+#endif /* AARCH64 */
 #include "memory/allocation.inline.hpp"
 #include "opto/addnode.hpp"
 #include "opto/callnode.hpp"
@@ -993,6 +997,11 @@ bool IdealLoopTree::policy_unroll(PhaseIdealLoop *phase) {
   // Also count ModL, DivL and MulL which expand mightly
   for (uint k = 0; k < _body.size(); k++) {
     Node* n = _body.at(k);
+#ifdef AARCH64
+    if (MemNode::barrier_data(n) != 0) {
+      body_size += BarrierSet::barrier_set()->barrier_set_c2()->estimated_barrier_size(n);
+    }
+#endif /* AARCH64 */
     switch (n->Opcode()) {
       case Op_XorI: xors_in_loop++; break; // CRC32 java code
       case Op_ModL: body_size += 30; break;

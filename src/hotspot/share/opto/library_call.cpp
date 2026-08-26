@@ -308,8 +308,16 @@ bool LibraryCallKit::try_to_inline(int predicate) {
 
   case vmIntrinsics::_equalsL:                  return inline_string_equals(StrIntrinsicNode::LL);
   case vmIntrinsics::_equalsU:                  return inline_string_equals(StrIntrinsicNode::UU);
+  case vmIntrinsics::_equalsIgnoreCaseLL:       return inline_string_equals_ignore_case(StrIntrinsicNode::LL);
+  case vmIntrinsics::_equalsIgnoreCaseLU:       return inline_string_equals_ignore_case(StrIntrinsicNode::LU);
+  case vmIntrinsics::_equalsIgnoreCaseUU:       return inline_string_equals_ignore_case(StrIntrinsicNode::UU);
 
   case vmIntrinsics::_vectorizedHashCode:       return inline_vectorizedHashCode();
+  case vmIntrinsics::_stringLatin1ToLowerCase:
+  case vmIntrinsics::_stringLatin1ToUpperCase:
+  case vmIntrinsics::_stringUTF16ToLowerCase:
+  case vmIntrinsics::_stringUTF16ToUpperCase:
+                                                return inline_string_case_convert();
 
   case vmIntrinsics::_toBytesStringU:           return inline_string_toBytesU();
   case vmIntrinsics::_getCharsStringU:          return inline_string_getCharsU();
@@ -788,6 +796,11 @@ Node* LibraryCallKit::try_to_predicate(int predicate) {
     return inline_digestBase_implCompressMB_predicate(predicate);
   case vmIntrinsics::_galoisCounterMode_AESCrypt:
     return inline_galoisCounterMode_AESCrypt_predicate();
+  case vmIntrinsics::_equalsIgnoreCaseLL:
+  case vmIntrinsics::_equalsIgnoreCaseLU:
+  case vmIntrinsics::_equalsIgnoreCaseUU:
+    assert(predicate == 0, "sanity");
+    return inline_string_equals_ignore_case_predicate();
 
   default:
     // If you get here, it may be that someone has added a new intrinsic
@@ -1025,6 +1038,74 @@ bool LibraryCallKit::inline_string_compareTo(StrIntrinsicNode::ArgEnc ae) {
   Node* result = make_string_method_node(Op_StrComp, arg1_start, arg1_cnt, arg2_start, arg2_cnt, ae);
   set_result(result);
   return true;
+}
+
+//-----------------------inline_string_equals_ignore_case--------------------
+bool LibraryCallKit::inline_string_equals_ignore_case(StrIntrinsicNode::ArgEnc ae) {
+  address stub_addr = nullptr;
+  const char* stub_name = nullptr;
+  int value_shift = 0;
+  int other_shift = 0;
+
+  switch (ae) {
+  case StrIntrinsicNode::LL:
+    stub_addr = StubRoutines::string_equals_ignore_case_ll();
+    stub_name = "stringEqualsIgnoreCaseLL";
+    break;
+  case StrIntrinsicNode::LU:
+    stub_addr = StubRoutines::string_equals_ignore_case_lu();
+    stub_name = "stringEqualsIgnoreCaseLU";
+    other_shift = 1;
+    break;
+  case StrIntrinsicNode::UU:
+    stub_addr = StubRoutines::string_equals_ignore_case_uu();
+    stub_name = "stringEqualsIgnoreCaseUU";
+    value_shift = 1;
+    other_shift = 1;
+    break;
+  default:
+    return false;
+  }
+
+  // Resolve every target-specific property before modifying the graph.  This
+  // keeps a failed intrinsic attempt side-effect free.
+  if (stub_addr == nullptr) {
+    return false;
+  }
+
+  assert(callee()->signature()->size() == 5,
+         "equalsIgnoreCase helper has 5 arguments");
+  Node* value   = must_be_not_null(argument(0), true);
+  Node* toffset = argument(1);
+  Node* other   = must_be_not_null(argument(2), true);
+  Node* ooffset = argument(3);
+  Node* len     = argument(4);
+
+  if (value_shift != 0) {
+    toffset = _gvn.transform(new LShiftINode(toffset, intcon(value_shift)));
+  }
+  if (other_shift != 0) {
+    ooffset = _gvn.transform(new LShiftINode(ooffset, intcon(other_shift)));
+  }
+
+  Node* value_start = array_element_address(value, toffset, T_BYTE);
+  Node* other_start = array_element_address(other, ooffset, T_BYTE);
+  Node* call = make_runtime_call(RC_LEAF,
+                                 OptoRuntime::string_equals_ignore_case_Type(),
+                                 stub_addr, stub_name, TypePtr::BOTTOM,
+                                 value_start, other_start, len);
+  set_result(_gvn.transform(new ProjNode(call, TypeFunc::Parms)));
+  return true;
+}
+
+//-------------------inline_string_equals_ignore_case_predicate--------------
+Node* LibraryCallKit::inline_string_equals_ignore_case_predicate() {
+  Node* len = argument(4);
+  Node* cmp = _gvn.transform(new CmpINode(
+      len, intcon(StubRoutines::string_equals_ignore_case_min_length())));
+  Node* below_threshold =
+      _gvn.transform(new BoolNode(cmp, BoolTest::lt));
+  return generate_guard(below_threshold, nullptr, PROB_MIN);
 }
 
 //------------------------------inline_string_equals------------------------
@@ -6260,7 +6341,7 @@ bool LibraryCallKit::inline_vectorizedMismatch() {
 
   if (elem_bt != T_ILLEGAL && ArrayOperationPartialInlineSize > 0) {
     inline_limit = ArrayOperationPartialInlineSize / type2aelembytes(elem_bt);
-    do_partial_inline = inline_limit >= 16;
+    do_partial_inline = inline_limit > 0 && Matcher::vector_size_supported(elem_bt, inline_limit);
   }
 
   if (do_partial_inline) {
@@ -6354,6 +6435,114 @@ bool LibraryCallKit::inline_vectorizedHashCode() {
     array_start, length, initialValue, basic_type)));
   clear_upper_avx();
 
+  return true;
+}
+
+//------------------------------inline_string_case_convert------------------
+bool LibraryCallKit::inline_string_case_convert() {
+  assert(callee()->signature()->size() == 4, "String case helper has 4 parameters");
+
+  address stub = nullptr;
+  bool is_utf16 = false;
+  switch (intrinsic_id()) {
+    case vmIntrinsics::_stringLatin1ToLowerCase:
+      stub = StubRoutines::string_case_latin1_lower();
+      break;
+    case vmIntrinsics::_stringLatin1ToUpperCase:
+      stub = StubRoutines::string_case_latin1_upper();
+      break;
+    case vmIntrinsics::_stringUTF16ToLowerCase:
+      stub = StubRoutines::string_case_utf16_lower();
+      is_utf16 = true;
+      break;
+    case vmIntrinsics::_stringUTF16ToUpperCase:
+      stub = StubRoutines::string_case_utf16_upper();
+      is_utf16 = true;
+      break;
+    default:
+      ShouldNotReachHere();
+  }
+
+  if (stub == nullptr) {
+    return false;
+  }
+
+  Node* src   = argument(0);
+  Node* dst   = argument(1);
+  Node* first = argument(2);
+  Node* len   = argument(3);
+
+  Node* count = _gvn.transform(new SubINode(len, first));
+  const TypeInt* count_type = _gvn.type(count)->isa_int();
+  const int min_length = StubRoutines::string_case_intrinsic_min_length();
+  if (min_length > 0 &&
+      count_type != nullptr &&
+      count_type->_hi < min_length) {
+    return false;
+  }
+
+  src = must_be_not_null(src, true);
+  dst = must_be_not_null(dst, true);
+
+  Node* slow_control = nullptr;
+  Node* initial_io = nullptr;
+  Node* initial_mem = nullptr;
+  if (min_length > 0 &&
+      (count_type == nullptr || count_type->_lo < min_length)) {
+    Node* cmp = _gvn.transform(new CmpINode(count, intcon(min_length)));
+    Node* is_short = _gvn.transform(new BoolNode(cmp, BoolTest::lt));
+    initial_io = i_o();
+    initial_mem = reset_memory();
+    set_all_memory(initial_mem);
+    slow_control = generate_fair_guard(is_short, nullptr);
+  }
+
+  Node* byte_offset = first;
+  if (is_utf16) {
+    byte_offset = _gvn.transform(new LShiftINode(first, intcon(1)));
+  }
+  Node* src_start = array_element_address(src, byte_offset, T_BYTE);
+  Node* dst_start = array_element_address(dst, byte_offset, T_BYTE);
+
+  Node* call = make_runtime_call(RC_LEAF | RC_NO_FP,
+                                 OptoRuntime::stringCaseConvert_Type(),
+                                 stub,
+                                 "stringCaseConvert",
+                                 TypePtr::BOTTOM,
+                                 src_start,
+                                 dst_start,
+                                 first,
+                                 count);
+  Node* fast_result = _gvn.transform(new ProjNode(call, TypeFunc::Parms));
+  if (slow_control == nullptr) {
+    set_result(fast_result);
+    return true;
+  }
+
+  enum { _fast_path = 1, _slow_path, PATH_LIMIT };
+  RegionNode* result_region = new RegionNode(PATH_LIMIT);
+  PhiNode* result_value = new PhiNode(result_region, TypeInt::INT);
+  PhiNode* result_io = new PhiNode(result_region, Type::ABIO);
+  PhiNode* result_memory = new PhiNode(result_region, Type::MEMORY, TypePtr::BOTTOM);
+
+  result_region->init_req(_fast_path, control());
+  result_value->init_req(_fast_path, fast_result);
+  result_io->init_req(_fast_path, i_o());
+  result_memory->init_req(_fast_path, reset_memory());
+
+  set_control(slow_control);
+  set_i_o(initial_io);
+  set_all_memory(initial_mem);
+  CallJavaNode* slow_call = generate_method_call(intrinsic_id(), false, true, false);
+  Node* slow_result = set_results_for_java_call(slow_call);
+  result_region->init_req(_slow_path, control());
+  result_value->init_req(_slow_path, slow_result);
+  result_io->init_req(_slow_path, i_o());
+  result_memory->init_req(_slow_path, reset_memory());
+
+  set_i_o(_gvn.transform(result_io));
+  set_all_memory(_gvn.transform(result_memory));
+  set_result(result_region, result_value);
   return true;
 }
 

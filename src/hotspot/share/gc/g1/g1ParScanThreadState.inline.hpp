@@ -96,6 +96,29 @@ G1OopStarChunkedList* G1ParScanThreadState::oops_into_optional_region(const Heap
   return &_oops_into_optional_regions[hr->index_in_opt_cset()];
 }
 
+#ifdef AARCH64
+template <class T> bool G1ParScanThreadState::mark_if_new(T* p, bool into_new_survivor) {
+  G1CardTable::CardValue* card = ct()->byte_for(p);
+  G1CardTable::CardValue value = *card;
+  if (value == G1CardTable::clean_card_val()) {
+    *card = into_new_survivor ? G1CardTable::g1_to_cset_card : G1CardTable::g1_dirty_card;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+template <class T> void G1ParScanThreadState::mark_card_into_evac_fail_region(T* p, oop obj) {
+  assert(!HeapRegion::is_in_same_region(p, obj), "Should have filtered out cross-region references already.");
+  assert(!_g1h->heap_region_containing(p)->is_survivor(), "Should have filtered out from-newly allocated survivor references already.");
+  assert(_g1h->heap_region_containing(obj)->in_collection_set(), "Only for enqeueing reference into collection set region");
+
+  if (mark_if_new(p, false /* into_new_survivor */)) { // The reference is never into survivor regions.
+    _num_cards_from_evac_failure++;
+  }
+}
+
+#endif /* AARCH64 */
 template <class T> void G1ParScanThreadState::write_ref_field_post(T* p, oop obj) {
   assert(obj != nullptr, "Must be");
   if (HeapRegion::is_in_same_region(p, obj)) {
@@ -110,15 +133,24 @@ template <class T> void G1ParScanThreadState::write_ref_field_post(T* p, oop obj
   G1HeapRegionAttr dest_attr = _g1h->region_attr(obj);
   // References to the current collection set are references to objects that failed
   // evacuation. Currently these regions are always relabelled as old without
-  // remembered sets, so skip them.
+  // remembered sets, so skip them. AArch64 still records their cards for the
+  // evacuation-failure recovery path.
   if (dest_attr.is_in_cset()) {
     assert(obj->is_forwarded(), "evac-failed but not forwarded: " PTR_FORMAT, p2i(obj));
     assert(obj->forwardee() == obj, "evac-failed but not self-forwarded: " PTR_FORMAT, p2i(obj));
+#ifdef AARCH64
+    mark_card_into_evac_fail_region(p, obj);
+#endif /* AARCH64 */
     return;
   }
+#ifndef AARCH64
   enqueue_card_if_tracked(dest_attr, p, obj);
+#else /* AARCH64 */
+  mark_card_if_tracked(dest_attr, p, obj);
+#endif /* AARCH64 */
 }
 
+#ifndef AARCH64
 template <class T> void G1ParScanThreadState::enqueue_card_if_tracked(G1HeapRegionAttr region_attr, T* p, oop o) {
   assert(!HeapRegion::is_in_same_region(p, o), "Should have filtered out cross-region references already.");
   assert(!_g1h->heap_region_containing(p)->is_survivor(), "Should have filtered out from-newly allocated survivor references already.");
@@ -144,5 +176,34 @@ template <class T> void G1ParScanThreadState::enqueue_card_if_tracked(G1HeapRegi
     _last_enqueued_card = card_index;
   }
 }
+#else /* AARCH64 */
+template <class T> void G1ParScanThreadState::mark_card_if_tracked(G1HeapRegionAttr region_attr, T* p, oop o) {
+  assert(!HeapRegion::is_in_same_region(p, o), "Should have filtered out cross-region references already.");
+  assert(!_g1h->heap_region_containing(p)->is_survivor(), "Should have filtered out from-newly allocated survivor references already.");
+  // We relabel all regions that failed evacuation as old gen without remembered,
+  // and so pre-filter them out in the caller.
+  assert(!_g1h->heap_region_containing(o)->in_collection_set(), "Should not try to mark reference into collection set region");
+
+#ifdef ASSERT
+  HeapRegion* const hr_obj = _g1h->heap_region_containing(o);
+  assert(region_attr.remset_is_tracked() == hr_obj->rem_set()->is_tracked(),
+         "State flag indicating remset tracking disagrees (%s) with actual remembered set (%s) for region %u",
+         BOOL_TO_STR(region_attr.remset_is_tracked()),
+         BOOL_TO_STR(hr_obj->rem_set()->is_tracked()),
+         hr_obj->hrm_index());
+#endif
+  if (!region_attr.remset_is_tracked()) {
+    return;
+  }
+  bool into_survivor = region_attr.is_new_survivor();
+  if (mark_if_new(p, into_survivor)) {
+    if (into_survivor) {
+      _num_cards_marked_to_cset++;
+    } else {
+      _num_cards_marked_dirty++;
+    }
+  }
+}
+#endif /* AARCH64 */
 
 #endif // SHARE_GC_G1_G1PARSCANTHREADSTATE_INLINE_HPP

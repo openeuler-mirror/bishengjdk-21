@@ -262,9 +262,11 @@ HeapWord* G1Allocator::survivor_attempt_allocation(uint node_index,
       }
     }
   }
+#ifndef AARCH64
   if (result != nullptr) {
     _g1h->dirty_young_block(result, *actual_word_size);
   }
+#endif /* ! AARCH64 */
   return result;
 }
 

@@ -1,6 +1,8 @@
 /*
  * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, 2024, Red Hat Inc. All rights reserved.
+ * Copyright 2026 Arm Limited and/or its affiliates.
+ * Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,12 +30,14 @@
 #include "asm/macroAssembler.inline.hpp"
 #include "asm/register.hpp"
 #include "atomic_aarch64.hpp"
+#include "stringCaseMappings_aarch64.hpp"
 #include "compiler/oopMap.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/barrierSetAssembler.hpp"
 #include "gc/shared/gc_globals.hpp"
 #include "gc/shared/tlab_globals.hpp"
 #include "interpreter/interpreter.hpp"
+#include "logging/log.hpp"
 #include "memory/universe.hpp"
 #include "nativeInst_aarch64.hpp"
 #include "oops/instanceOop.hpp"
@@ -46,7 +50,9 @@
 #include "runtime/continuationEntry.inline.hpp"
 #include "runtime/frame.inline.hpp"
 #include "runtime/handles.inline.hpp"
+#include "runtime/java.hpp"
 #include "runtime/javaThread.hpp"
+#include "runtime/os.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubCodeGenerator.hpp"
 #include "runtime/stubRoutines.hpp"
@@ -54,6 +60,7 @@
 #include "utilities/debug.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/intpow.hpp"
+#include "utilities/ostream.hpp"
 #include "utilities/powerOfTwo.hpp"
 #ifdef COMPILER2
 #include "opto/runtime.hpp"
@@ -79,6 +86,59 @@
 
 // Stub Code definitions
 
+#define AARCH64_OPTIMIZATION_HITS(DO)       \
+  DO(vectorized_hashcode_neon_latin1)       \
+  DO(vectorized_hashcode_neon_byte)         \
+  DO(vectorized_hashcode_neon_char_utf16)   \
+  DO(vectorized_hashcode_neon_int)          \
+  DO(vectorized_hashcode_neon_short)        \
+  DO(vectorized_hashcode_sve2_latin1)       \
+  DO(vectorized_hashcode_sve2_byte)         \
+  DO(vectorized_hashcode_sve2_char_utf16)   \
+  DO(vectorized_hashcode_sve2_short)        \
+  DO(forward_arraycopy_prefetch)            \
+  DO(sve_small_block_zeroing)               \
+  DO(string_case_latin1_lower)              \
+  DO(string_case_latin1_upper)              \
+  DO(string_case_utf16_lower)               \
+  DO(string_case_utf16_upper)               \
+  DO(vectorized_mismatch)                   \
+  DO(string_equals_ignore_case_ll)          \
+  DO(string_equals_ignore_case_lu)          \
+  DO(string_equals_ignore_case_uu)
+
+enum OptimizationId {
+#define DECLARE_OPTIMIZATION_ID(name) name,
+  AARCH64_OPTIMIZATION_HITS(DECLARE_OPTIMIZATION_ID)
+#undef DECLARE_OPTIMIZATION_ID
+  number_of_optimization_ids
+};
+
+static const char* const optimization_names[] = {
+#define DECLARE_OPTIMIZATION_NAME(name) #name,
+  AARCH64_OPTIMIZATION_HITS(DECLARE_OPTIMIZATION_NAME)
+#undef DECLARE_OPTIMIZATION_NAME
+};
+
+#undef AARCH64_OPTIMIZATION_HITS
+
+STATIC_ASSERT(ARRAY_SIZE(optimization_names) == number_of_optimization_ids);
+STATIC_ASSERT(number_of_optimization_ids <= 64);
+
+static volatile uint64_t optimization_hit_mask = 0;
+static address optimization_hit_reporter = nullptr;
+
+static void report_optimization_hit(int id) {
+  assert(id >= 0 && id < number_of_optimization_ids,
+         "invalid optimization id");
+  const uint64_t bit = UCONST64(1) << id;
+  const uint64_t old_mask = Atomic::fetch_then_or(&optimization_hit_mask, bit);
+  if ((old_mask & bit) == 0) {
+    ttyLocker ttyl;
+    tty->print_cr("AArch64 optimization hit: %s", optimization_names[id]);
+  }
+}
+
 class StubGenerator: public StubCodeGenerator {
  private:
 
@@ -92,6 +152,67 @@ class StubGenerator: public StubCodeGenerator {
   BLOCK_COMMENT("inc_counter " #counter); \
   inc_counter_np_(counter);
 #endif
+
+  // The diagnostic hit-recording code is emitted only when requested at VM
+  // startup, so the normal path has no extra instructions. After the first
+  // hit, the generated code only loads the shared hit mask and tests its bit.
+  // The shared reporter preserves the complete register state after entry.
+  // Preserve r17 around the hit-mask check, and preserve r16 and lr around the
+  // reporter call, because this code runs outside the target stub's clobber set.
+  void record_optimization_hit(OptimizationId id) {
+    if (PrintAArch64OptimizationHits) {
+      Label done;
+      uint64_t offset;
+
+      __ str(r17, Address(__ pre(sp, -2 * wordSize)));
+      __ adrp(r17, ExternalAddress(reinterpret_cast<address>(
+          const_cast<uint64_t*>(&optimization_hit_mask))), offset);
+      __ ldr(r17, Address(r17, offset));
+      __ tbnz(r17, id, done);
+
+      assert(optimization_hit_reporter != nullptr,
+             "optimization hit reporter must be generated first");
+      __ stp(r16, lr, Address(__ pre(sp, -2 * wordSize)));
+      __ movw(r17, id);
+      __ mov(r16, optimization_hit_reporter);
+      __ blr(r16);
+      __ ldp(r16, lr, Address(__ post(sp, 2 * wordSize)));
+
+      __ bind(done);
+      __ ldr(r17, Address(__ post(sp, 2 * wordSize)));
+    }
+  }
+
+  address generate_optimization_hit_reporter() {
+    const bool use_sve = UseSVE > 0;
+    const int sve_vector_size_in_bytes = use_sve
+        ? VM_Version::get_initial_sve_vector_length()
+        : 0;
+    const int total_predicate_in_bytes = use_sve
+        ? (sve_vector_size_in_bytes >> LogBitsPerByte) *
+              PRegister::number_of_registers
+        : 0;
+
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", "aarch64_optimization_hit_reporter");
+    address start = __ pc();
+
+    __ enter();
+    __ get_nzcv(r16);
+    // Some callers expose only the target stub's narrow clobber set to C2.
+    // Preserve the full machine state before making the broader native call.
+    __ push_CPU_state(true, use_sve, sve_vector_size_in_bytes,
+                      total_predicate_in_bytes);
+    __ movw(c_rarg0, r17);
+    __ call_VM_leaf(CAST_FROM_FN_PTR(address, report_optimization_hit), 1);
+    __ pop_CPU_state(true, use_sve, sve_vector_size_in_bytes,
+                     total_predicate_in_bytes);
+    __ set_nzcv(r16);
+    __ leave();
+    __ ret(lr);
+
+    return start;
+  }
 
   // Call stubs are used to call Java from C
   //
@@ -650,15 +771,91 @@ class StubGenerator: public StubCodeGenerator {
   // r11: the number of words in the tail.
   //      r11 < MacroAssembler::zero_words_block_size.
 
-  address generate_zero_blocks() {
+  // Emit a whole-range SVE zeroing path. It follows the zero_blocks
+  // contract by setting cnt to zero and base to the end of the cleared range.
+  void generate_sve_zero_block(Register base, Register cnt, Label& fallback,
+                               uint min_words, uint max_words) {
+    Label sve_full_loop, sve_tail, sve_done;
+    const Register idx = rscratch1;
+    const Register full_end = rscratch2;
+    uint32_t vl_words = VM_Version::get_initial_sve_vector_length() >> LogBytesPerWord;
+
+    assert(vl_words > 0 && is_power_of_2(vl_words), "unexpected SVE vector length");
+    if (min_words > 0) {
+      assert(min_words <= 255, "small-block lower bound must fit in an immediate");
+      __ cmp(cnt, (u1)min_words);
+      __ br(Assembler::LO, fallback);
+    }
+    if (max_words > 0) {
+      __ mov(idx, max_words);
+      __ cmp(cnt, idx);
+      __ br(Assembler::HI, fallback);
+    }
+
+    // Record only ranges accepted by the SVE path, not calls that branch to
+    // the regular zero_blocks implementation.
+    record_optimization_hit(sve_small_block_zeroing);
+
+    __ sve_dup(v0, Assembler::D, 0);
+    __ mov(idx, zr);
+    __ andr(full_end, cnt, -vl_words);
+    __ cbz(full_end, sve_tail);
+    __ sve_ptrue(p0, Assembler::D);
+
+    __ bind(sve_full_loop);
+    __ sve_st1d(v0, Assembler::D, p0, Address(base, idx, Address::lsl(LogBytesPerWord)));
+    __ sve_inc(idx, Assembler::D);
+    __ cmp(idx, full_end);
+    __ br(Assembler::LO, sve_full_loop);
+
+    __ cmp(idx, cnt);
+    __ br(Assembler::EQ, sve_done);
+
+    __ bind(sve_tail);
+    __ sve_whilelo(p0, Assembler::D, idx, cnt);
+    __ sve_st1d(v0, Assembler::D, p0, Address(base, idx, Address::lsl(LogBytesPerWord)));
+
+    __ bind(sve_done);
+    __ add(base, base, cnt, Assembler::LSL, LogBytesPerWord);
+    __ mov(cnt, zr);
+    __ ret(lr);
+  }
+
+  // zero_blocks follows the JDK zero_words() stub contract:
+  //
+  //   input:  r10 = base, r11 = cnt in HeapWords
+  //   output: r10/r11 adjusted to any remaining tail
+  //
+  // Small clears can avoid the fixed setup cost of the generic DC ZVA path by
+  // using predicated SVE stores for a bounded word range:
+  //
+  //   16..SVESmallBlockZeroingMaxWords words:
+  //     whole-range SVE st1d stores
+  //
+  //   otherwise:
+  //     original JDK zero_blocks path
+  address generate_zero_blocks(address* sve_entry) {
     Label done;
     Label base_aligned;
+    Label regular_entry;
 
     Register base = r10, cnt = r11;
 
     __ align(CodeEntryAlignment);
+    *sve_entry = nullptr;
+
+    if (UseSVESmallBlockZeroing && SVESmallBlockZeroingMaxWords > 0) {
+      StubCodeMark mark(this, "StubRoutines", "zero_blocks_sve");
+      *sve_entry = __ pc();
+      generate_sve_zero_block(base, cnt, regular_entry, 16, SVESmallBlockZeroingMaxWords);
+    }
+
     StubCodeMark mark(this, "StubRoutines", "zero_blocks");
+    __ bind(regular_entry);
     address start = __ pc();
+    if (*sve_entry == nullptr) {
+      *sve_entry = start;
+    }
 
     if (UseBlockZeroing) {
       int zva_length = VM_Version::zva_length();
@@ -1123,6 +1320,106 @@ class StubGenerator: public StubCodeGenerator {
       }
   }
 
+  // Prefetching forward copy for long[] bulk arraycopy.
+  //
+  // copy_memory() handles tiny copies inline before this bulk stub is reached.
+  // Keep this stub focused on the remaining forward-copy ranges: ASIMD
+  // q-register fixed-size copies up to 128 bytes and a prefetching 64-byte
+  // ASIMD software pipeline for larger copies.
+  void generate_copy_longs_pf(Label &start, Register s, Register d, Register count) {
+    const Register bulk_words = r3, bytes = r4, srcend = r5, dstend = r6;
+    const Register tmp = r7, dst = rscratch1;
+    Label copy_short, copy96_128, copy96, loop64, copy64_from_end, done;
+
+    assert_different_registers(s, d, count, bulk_words, bytes, srcend, dstend, tmp, dst);
+
+    __ align(CodeEntryAlignment);
+
+    StubCodeMark mark(this, "StubRoutines", "forward_copy_longs_pf");
+
+    __ bind(start);
+    record_optimization_hit(forward_arraycopy_prefetch);
+
+#ifdef ASSERT
+    // Make sure we are never given < 8 words.
+    {
+      Label L;
+      __ cmp(count, (u1)8);
+      __ br(Assembler::GE, L);
+      __ stop("forward_copy_longs_pf called with < 8 words");
+      __ bind(L);
+    }
+#endif
+
+    // Keep the same contract as generate_copy_longs(): copy all but the low
+    // count bit, and leave s/d at the remaining word for copy_memory_small().
+    __ andr(bulk_words, count, -2);
+    __ lsl(bytes, bulk_words, LogBytesPerWord);
+    __ add(srcend, s, bytes);
+    __ add(dstend, d, bytes);
+
+    __ cmp(bytes, (u1)128);
+    __ br(Assembler::LS, copy_short);
+
+    __ ldrq(v3, Address(s, 0));
+    __ andr(tmp, s, 15);
+    __ andr(s, s, -16);
+    __ sub(dst, d, tmp);
+    __ add(bytes, bytes, tmp);
+    __ ldpq(v0, v1, Address(s, 16));
+    __ strq(v3, Address(d, 0));
+    __ ldpq(v2, v3, Address(s, 48));
+    __ subs(bytes, bytes, 128 + 16);
+    __ br(Assembler::LS, copy64_from_end);
+
+    __ bind(loop64);
+    __ prfm(Address(s, 144), PLDL1STRM);
+    __ stpq(v0, v1, Address(dst, 16));
+    __ ldpq(v0, v1, Address(s, 80));
+    __ stpq(v2, v3, Address(dst, 48));
+    __ ldpq(v2, v3, Address(s, 112));
+    __ add(s, s, 64);
+    __ add(dst, dst, 64);
+    __ subs(bytes, bytes, 64);
+    __ br(Assembler::HI, loop64);
+
+    __ bind(copy64_from_end);
+    __ ldpq(v4, v5, Address(srcend, -64));
+    __ stpq(v0, v1, Address(dst, 16));
+    __ ldpq(v0, v1, Address(srcend, -32));
+    __ stpq(v2, v3, Address(dst, 48));
+    __ stpq(v4, v5, Address(dstend, -64));
+    __ stpq(v0, v1, Address(dstend, -32));
+
+    __ bind(done);
+    __ mov(s, srcend);
+    __ mov(d, dstend);
+    __ ret(lr);
+
+    __ bind(copy_short);
+    __ ldpq(v0, v1, Address(s, 0));
+    __ ldpq(v2, v3, Address(srcend, -32));
+    __ cmp(bytes, (u1)64);
+    __ br(Assembler::HI, copy96_128);
+
+    __ stpq(v0, v1, Address(d, 0));
+    __ stpq(v2, v3, Address(dstend, -32));
+    __ b(done);
+
+    __ bind(copy96_128);
+    __ ldpq(v4, v5, Address(s, 32));
+    __ cmp(bytes, (u1)96);
+    __ br(Assembler::LS, copy96);
+    __ ldpq(v6, v7, Address(srcend, -64));
+    __ stpq(v6, v7, Address(dstend, -64));
+
+    __ bind(copy96);
+    __ stpq(v0, v1, Address(d, 0));
+    __ stpq(v4, v5, Address(d, 32));
+    __ stpq(v2, v3, Address(dstend, -32));
+    __ b(done);
+  }
+
   // Small copy: less than 16 bytes.
   //
   // NB: Ignores all of the bits of count which represent more than 15
@@ -1174,7 +1471,7 @@ class StubGenerator: public StubCodeGenerator {
     }
   }
 
-  Label copy_f, copy_b;
+  Label copy_f, copy_b, copy_f_pf;
   Label copy_obj_f, copy_obj_b;
   Label copy_obj_uninit_f, copy_obj_uninit_b;
 
@@ -1407,7 +1704,19 @@ class StubGenerator: public StubCodeGenerator {
     __ lsr(r15, count, exact_log2(wordSize/granularity));
     if (direction == copy_forwards) {
       if (type != T_OBJECT) {
-        __ bl(copy_f);
+        if (UseStreamPrefetchForArrayCopy) {
+          Label copy_default, copy_done;
+          __ mov(rscratch1, StreamPrefetchArrayCopyMinLongs);
+          __ cmp(r15, rscratch1);
+          __ br(Assembler::LT, copy_default);
+          __ bl(copy_f_pf);
+          __ b(copy_done);
+          __ bind(copy_default);
+          __ bl(copy_f);
+          __ bind(copy_done);
+        } else {
+          __ bl(copy_f);
+        }
       } else if ((decorators & IS_DEST_UNINITIALIZED) != 0) {
         __ bl(copy_obj_uninit_f);
       } else {
@@ -2571,6 +2880,9 @@ class StubGenerator: public StubCodeGenerator {
 
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_BYTE, copy_f, r0, r1, r15, copy_forwards);
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_BYTE, copy_b, r0, r1, r15, copy_backwards);
+    if (UseStreamPrefetchForArrayCopy) {
+      generate_copy_longs_pf(copy_f_pf, r0, r1, r15);
+    }
 
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_OBJECT, copy_obj_f, r0, r1, r15, copy_forwards);
     generate_copy_longs(IN_HEAP | IS_ARRAY, T_OBJECT, copy_obj_b, r0, r1, r15, copy_backwards);
@@ -2578,7 +2890,7 @@ class StubGenerator: public StubCodeGenerator {
     generate_copy_longs(IN_HEAP | IS_ARRAY | IS_DEST_UNINITIALIZED, T_OBJECT, copy_obj_uninit_f, r0, r1, r15, copy_forwards);
     generate_copy_longs(IN_HEAP | IS_ARRAY | IS_DEST_UNINITIALIZED, T_OBJECT, copy_obj_uninit_b, r0, r1, r15, copy_backwards);
 
-    StubRoutines::aarch64::_zero_blocks = generate_zero_blocks();
+    StubRoutines::aarch64::_zero_blocks = generate_zero_blocks(&StubRoutines::aarch64::_zero_blocks_sve);
 
     //*** jbyte
     // Always need aligned and unaligned versions
@@ -4676,6 +4988,46 @@ class StubGenerator: public StubCodeGenerator {
     return start;
   }
 
+  /**
+   *  Arguments:
+   *
+   *  Input:
+   *    c_rarg0   - obja     address
+   *    c_rarg1   - objb     address
+   *    c_rarg2   - length   length
+   *    c_rarg3   - scale    log2_array_indxscale
+   *
+   *  Output:
+   *         r0   - int >= 0 mismatched index, < 0 bitwise complement of tail
+   */
+  address generate_vectorizedMismatch() {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", "vectorizedMismatch");
+    address start = __ pc();
+
+    record_optimization_hit(vectorized_mismatch);
+
+    const Register obja = c_rarg0;
+    const Register objb = c_rarg1;
+    const Register length = c_rarg2;
+    const Register scale = c_rarg3;
+    const Register tmp = r4;
+    const FloatRegister ztmp1 = z0;
+    const FloatRegister ztmp2 = z1;
+    const PRegister pgtmp = p0;
+    const PRegister ptmp = p8;
+    const Register result = r0;
+
+    BLOCK_COMMENT("Entry:");
+    __ enter();
+    __ vectorized_mismatch(obja, objb, length, scale, result, tmp,
+                           ztmp1, ztmp2, pgtmp, ptmp);
+    __ leave();
+    __ ret(lr);
+
+    return start;
+  }
+
   address generate_squareToLen() {
     // squareToLen algorithm for sizes 1..127 described in java code works
     // faster than multiply_to_len on some CPUs and slower on others, but
@@ -5361,21 +5713,27 @@ class StubGenerator: public StubCodeGenerator {
     __ align(CodeEntryAlignment);
 
     const char *mark_name = "";
+    OptimizationId optimization_id = number_of_optimization_ids;
     switch (eltype) {
     case T_BOOLEAN:
       mark_name = "_large_arrays_hashcode_boolean";
+      optimization_id = vectorized_hashcode_neon_latin1;
       break;
     case T_BYTE:
       mark_name = "_large_arrays_hashcode_byte";
+      optimization_id = vectorized_hashcode_neon_byte;
       break;
     case T_CHAR:
       mark_name = "_large_arrays_hashcode_char";
+      optimization_id = vectorized_hashcode_neon_char_utf16;
       break;
     case T_SHORT:
       mark_name = "_large_arrays_hashcode_short";
+      optimization_id = vectorized_hashcode_neon_short;
       break;
     case T_INT:
       mark_name = "_large_arrays_hashcode_int";
+      optimization_id = vectorized_hashcode_neon_int;
       break;
     default:
       mark_name = "_large_arrays_hashcode_incorrect_type";
@@ -5385,6 +5743,7 @@ class StubGenerator: public StubCodeGenerator {
     StubCodeMark mark(this, "StubRoutines", mark_name);
 
     address entry = __ pc();
+    record_optimization_hit(optimization_id);
     __ enter();
 
     // Put 0-3'th powers of 31 into a single SIMD register together. The register will be used in
@@ -5615,6 +5974,357 @@ class StubGenerator: public StubCodeGenerator {
 
     __ leave();
     __ ret(lr);
+
+    return entry;
+  }
+
+  address generate_large_arrays_hashcode_sve2(BasicType eltype) {
+    assert(eltype == T_BOOLEAN || eltype == T_BYTE ||
+           eltype == T_CHAR || eltype == T_SHORT, "unsupported eltype");
+
+    const Register result = r0, ary = r1, cnt = r2;
+    const Register pow_n = rscratch1, tmp = rscratch2;
+    const PRegister pload = p0, pwords = p1;
+    const FloatRegister zraw = v0;
+    const FloatRegister zh = v1;        // intermediate H-lane fold (byte path only)
+    const FloatRegister zs = v2;        // final S-lane group hashes
+    const FloatRegister zacc1 = v3;     // additional accumulators for 4x unroll
+    const FloatRegister zacc2 = v4;
+    const FloatRegister zacc3 = v5;
+    const FloatRegister zraw_alt = v6;  // second raw/fold pair for unrolled loops
+    const FloatRegister ztmp_alt = v7;
+    const FloatRegister zacc = v10;
+    const FloatRegister zpow = v11;
+    const FloatRegister zpowm = v12;
+    const FloatRegister zcoef_b = v13;  // byte coefficient vector (byte path only)
+    const FloatRegister zcoef_h = v14;  // halfword coefficient vector
+    const uint32_t vl_bytes = VM_Version::get_initial_sve_vector_length();
+    const bool is_byte = type2aelembytes(eltype) == 1;
+    const bool is_signed = is_signed_subword_type(eltype);
+    const uint32_t lanes = vl_bytes / sizeof(jint);
+    const uint32_t elem_size = type2aelembytes(eltype);
+    const uint32_t group_elems = sizeof(jint) / elem_size;
+    const uint32_t chunk_elems = vl_bytes / elem_size;
+    const uint32_t pow_n_value = intpow(31U, chunk_elems);
+    const uint32_t pow_4n_value = intpow(31U, 4 * chunk_elems);
+
+    Label BYTE_VECTOR_LOOP, BYTE_SINGLE_PREP, BYTE_SINGLE_LOOP,
+          CHAR_VECTOR_LOOP, CHAR_SINGLE_PREP, CHAR_SINGLE_LOOP,
+          REDUCE, TAIL, TAIL_LOOP, DONE, POWERS, COEF_H, COEF_B;
+
+    assert(vl_bytes >= 16 && is_power_of_2(vl_bytes), "unexpected SVE vector length");
+    assert(is_power_of_2(lanes), "unexpected lane count");
+    assert(group_elems == 4 || group_elems == 2, "unexpected grouping");
+
+    __ align(CodeEntryAlignment);
+
+    const char* mark_name = "";
+    OptimizationId optimization_id = number_of_optimization_ids;
+    switch (eltype) {
+    case T_BOOLEAN:
+      mark_name = "_large_arrays_hashcode_sve2_boolean";
+      optimization_id = vectorized_hashcode_sve2_latin1;
+      break;
+    case T_BYTE:
+      mark_name = "_large_arrays_hashcode_sve2_byte";
+      optimization_id = vectorized_hashcode_sve2_byte;
+      break;
+    case T_CHAR:
+      mark_name = "_large_arrays_hashcode_sve2_char";
+      optimization_id = vectorized_hashcode_sve2_char_utf16;
+      break;
+    case T_SHORT:
+      mark_name = "_large_arrays_hashcode_sve2_short";
+      optimization_id = vectorized_hashcode_sve2_short;
+      break;
+    default:
+      mark_name = "_large_arrays_hashcode_sve2_incorrect_type";
+      ShouldNotReachHere();
+    };
+
+    StubCodeMark mark(this, "StubRoutines", mark_name);
+
+    address entry = __ pc();
+    record_optimization_hit(optimization_id);
+    __ enter();
+    __ sve_ptrue(pload, is_byte ? Assembler::B : Assembler::H);
+    __ sve_ptrue(pwords, Assembler::S);
+
+    __ movw(pow_n, pow_n_value);
+    __ sve_dup(zacc, Assembler::S, 0);
+    __ sve_dup(zacc1, Assembler::S, 0);
+    __ sve_dup(zacc2, Assembler::S, 0);
+    __ sve_dup(zacc3, Assembler::S, 0);
+    __ sve_dup(zpowm, Assembler::S, pow_n);
+
+    // Load the lane-weight table for the final reduction. pow_n is a table
+    // address in this short section, not a polynomial multiplier.
+    __ adr(pow_n, POWERS);
+    __ sve_ldr(zpow, Address(pow_n, 0));
+
+    // Load the widening-multiply coefficient vectors. coef_h is always used;
+    // coef_b is only used by the byte path's first folding step.
+    __ adr(pow_n, COEF_H);
+    __ sve_ldr(zcoef_h, Address(pow_n, 0));
+    if (is_byte) {
+      __ adr(pow_n, COEF_B);
+      __ sve_ldr(zcoef_b, Address(pow_n, 0));
+    }
+    // Restore pow_n to 31^chunk_elems after the table loads.
+    __ movw(pow_n, pow_n_value);
+
+    __ lsr(tmp, cnt, exact_log2(chunk_elems));
+    __ cbz(tmp, TAIL);
+
+    // Let H(Ci) be the S-lane vector of per-group hashes for SVE chunk i.
+    // The 4x loop accumulates four interleaved streams:
+    //   zacc  = H(C0), H(C4), H(C8), ...
+    //   zacc1 = H(C1), H(C5), H(C9), ...
+    //   zacc2 = H(C2), H(C6), H(C10), ...
+    //   zacc3 = H(C3), H(C7), H(C11), ...
+    // Each stream advances by 31^(4*chunk_elems). After the loop we merge
+    // them with 31^chunk_elems to recover the original chunk order, and
+    // result is multiplied by the same 31^(full_vector_elements) factor as
+    // chunks are consumed, so final reduction only has to add the vector sum.
+#define SVE2_MULLB(Zd, T, Zn, Zm)                              \
+    do {                                                       \
+      if (is_signed) {                                         \
+        __ sve_smullb(Zd, T, Zn, Zm);                          \
+      } else {                                                 \
+        __ sve_umullb(Zd, T, Zn, Zm);                          \
+      }                                                        \
+    } while (0)
+
+#define SVE2_MLALT(Zd, T, Zn, Zm)                              \
+    do {                                                       \
+      if (is_signed) {                                         \
+        __ sve_smlalt(Zd, T, Zn, Zm);                          \
+      } else {                                                 \
+        __ sve_umlalt(Zd, T, Zn, Zm);                          \
+      }                                                        \
+    } while (0)
+
+    if (is_byte) {
+      // Run groups of four full SVE byte vectors through independent
+      // accumulators. Each chunk still uses the same two-stage B->H->S fold;
+      // the unroll shortens the outer hash dependency chain.
+      __ lsr(tmp, tmp, 2);
+      __ cbz(tmp, BYTE_SINGLE_PREP);
+
+      // The 4x loop advances each interleaved accumulator by
+      // 31^(4*chunk_elems), so pow_n temporarily uses that larger factor.
+      __ movw(pow_n, pow_4n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+
+      __ bind(BYTE_VECTOR_LOOP);
+      __ sve_ld1b(zraw, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1b(zraw_alt, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc1, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc2, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc3, Assembler::S, pwords, zpowm);
+      SVE2_MULLB(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MULLB(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MLALT(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MLALT(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MULLB(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MULLB(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MLALT(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+      __ sve_add(zacc1, Assembler::S, pwords, zraw_alt);
+
+      __ sve_ld1b(zraw, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1b(zraw_alt, Assembler::B, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      SVE2_MULLB(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MULLB(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MLALT(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MLALT(ztmp_alt, Assembler::H, zraw_alt, zcoef_b);
+      SVE2_MULLB(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MULLB(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MLALT(zraw_alt, Assembler::S, ztmp_alt, zcoef_h);
+      __ sve_add(zacc2, Assembler::S, pwords, zs);
+      __ sve_add(zacc3, Assembler::S, pwords, zraw_alt);
+
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, BYTE_VECTOR_LOOP);
+
+      // Merge the four strided accumulators back into the original chunk order:
+      // (((acc0 * 31^chunk_elems + acc1) * 31^chunk_elems + acc2)
+      //     * 31^chunk_elems + acc3).
+      __ movw(pow_n, pow_n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc1);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc2);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc3);
+
+      __ bind(BYTE_SINGLE_PREP);
+      __ lsr(tmp, cnt, exact_log2(chunk_elems));
+      __ andr(tmp, tmp, 3);
+      __ cbz(tmp, REDUCE);
+
+      __ bind(BYTE_SINGLE_LOOP);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_ld1b(zraw, Assembler::B, pload, Address(ary, 0));
+      // First widening step: B*B -> H. With coef_b = [31,1,31,1,...] as bytes,
+      //   MULLB.H produces  zh.H[i]  = zraw.B[2i]   * 31
+      //   MLALT.H accumulates zh.H[i] += zraw.B[2i+1] * 1
+      // i.e. zh.H[i] = b(2i)*31 + b(2i+1).
+      SVE2_MULLB(zh, Assembler::H, zraw, zcoef_b);
+      SVE2_MLALT(zh, Assembler::H, zraw, zcoef_b);
+      // Second widening step: H*H -> S. With coef_h = [961,1,961,1,...] as halfwords,
+      //   MULLB.S produces  zs.S[i]  = zh.H[2i]   * 961
+      //   MLALT.S accumulates zs.S[i] += zh.H[2i+1] * 1
+      // i.e. zs.S[i] = b(4i)*31^3 + b(4i+1)*31^2 + b(4i+2)*31 + b(4i+3).
+      SVE2_MULLB(zs, Assembler::S, zh, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zh, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+
+      __ add(ary, ary, vl_bytes);
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, BYTE_SINGLE_LOOP);
+    } else {
+      // Run groups of four full SVE vectors through four independent
+      // accumulators. This matches the polynomial order while shortening the
+      // per-accumulator dependency chain and amortizing loop overhead.
+      __ lsr(tmp, tmp, 2);
+      __ cbz(tmp, CHAR_SINGLE_PREP);
+
+      // The 4x loop advances each interleaved accumulator by
+      // 31^(4*chunk_elems), so pow_n temporarily uses that larger factor.
+      __ movw(pow_n, pow_4n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+
+      __ bind(CHAR_VECTOR_LOOP);
+      __ sve_ld1h(zraw, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1h(zraw_alt, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc1, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc2, Assembler::S, pwords, zpowm);
+      __ sve_mul(zacc3, Assembler::S, pwords, zpowm);
+      SVE2_MULLB(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MULLB(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MLALT(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+      __ sve_add(zacc1, Assembler::S, pwords, ztmp_alt);
+
+      __ sve_ld1h(zraw, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      __ sve_ld1h(zraw_alt, Assembler::H, pload, Address(ary, 0));
+      __ add(ary, ary, vl_bytes);
+      SVE2_MULLB(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MULLB(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MLALT(ztmp_alt, Assembler::S, zraw_alt, zcoef_h);
+      __ sve_add(zacc2, Assembler::S, pwords, zs);
+      __ sve_add(zacc3, Assembler::S, pwords, ztmp_alt);
+
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, CHAR_VECTOR_LOOP);
+
+      // Merge the four strided accumulators back into the original chunk order:
+      // (((acc0 * 31^chunk_elems + acc1) * 31^chunk_elems + acc2)
+      //     * 31^chunk_elems + acc3).
+      __ movw(pow_n, pow_n_value);
+      __ sve_dup(zpowm, Assembler::S, pow_n);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc1);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc2);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_add(zacc, Assembler::S, pwords, zacc3);
+
+      __ bind(CHAR_SINGLE_PREP);
+      __ lsr(tmp, cnt, exact_log2(chunk_elems));
+      __ andr(tmp, tmp, 3);
+      __ cbz(tmp, REDUCE);
+
+      __ bind(CHAR_SINGLE_LOOP);
+      __ sve_mul(zacc, Assembler::S, pwords, zpowm);
+      __ sve_ld1h(zraw, Assembler::H, pload, Address(ary, 0));
+      // Single widening step: H*H -> S. With coef_h = [31,1,31,1,...] as halfwords,
+      //   MULLB.S produces  zs.S[i]  = zraw.H[2i]   * 31
+      //   MLALT.S accumulates zs.S[i] += zraw.H[2i+1] * 1
+      // i.e. zs.S[i] = c(2i)*31 + c(2i+1).
+      SVE2_MULLB(zs, Assembler::S, zraw, zcoef_h);
+      SVE2_MLALT(zs, Assembler::S, zraw, zcoef_h);
+      __ sve_add(zacc, Assembler::S, pwords, zs);
+
+      __ add(ary, ary, vl_bytes);
+      __ maddw(result, result, pow_n, zr);
+      __ subsw(tmp, tmp, 1);
+      __ br(Assembler::NE, CHAR_SINGLE_LOOP);
+    }
+#undef SVE2_MULLB
+#undef SVE2_MLALT
+
+    // Weighted lane reduction: each lane already represents group_elems
+    // source elements, so the weights jump by that.
+    __ bind(REDUCE);
+    __ sve_mul(zacc, Assembler::S, pwords, zpow);
+    __ sve_uaddv(zraw, Assembler::S, pwords, zacc);
+    __ umov(tmp, zraw, Assembler::S, 0);
+    __ addw(result, result, tmp);
+
+    __ bind(TAIL);
+    __ andr(cnt, cnt, chunk_elems - 1);
+    // The scalar tail consumes one element per iteration, so pow_n becomes
+    // the ordinary hash multiplier 31.
+    __ movw(pow_n, 0x1f);
+    __ bind(TAIL_LOOP);
+    __ cbz(cnt, DONE);
+    __ load(tmp, Address(__ post(ary, elem_size)), eltype);
+    __ maddw(result, result, pow_n, tmp);
+    __ subw(cnt, cnt, 1);
+    __ b(TAIL_LOOP);
+
+    __ bind(DONE);
+    __ reinitialize_ptrue();
+    __ leave();
+    __ ret(lr);
+
+    __ align((int)MAX2((uint32_t)16, vl_bytes));
+    __ bind(POWERS);
+    for (uint32_t i = 0; i < lanes; ++i) {
+      __ emit_int32(intpow(31U, group_elems * (lanes - 1 - i)));
+    }
+
+    // coef_h holds alternating [outer_coef, 1, outer_coef, 1, ...] halfwords:
+    // - byte path uses outer_coef = 31^2 = 961 (second-stage H*H -> S fold)
+    // - halfword path uses outer_coef = 31     (single H*H -> S fold)
+    __ align((int)MAX2((uint32_t)16, vl_bytes));
+    __ bind(COEF_H);
+    {
+      const uint16_t outer_coef = is_byte ? 961 : 31;
+      for (uint32_t i = 0; i < vl_bytes / sizeof(uint16_t); i += 2) {
+        __ emit_int16(outer_coef);
+        __ emit_int16(1);
+      }
+    }
+
+    if (is_byte) {
+      // coef_b = [31, 1, 31, 1, ...] bytes for the first B*B -> H fold.
+      __ align((int)MAX2((uint32_t)16, vl_bytes));
+      __ bind(COEF_B);
+      for (uint32_t i = 0; i < vl_bytes; i += 2) {
+        __ emit_int8(31);
+        __ emit_int8(1);
+      }
+    }
 
     return entry;
   }
@@ -6580,6 +7290,704 @@ class StubGenerator: public StubCodeGenerator {
     UU,
   };
 
+  void emit_string_equals_ignore_case_fold(Register code_point,
+                                           Register result,
+                                           Register page_index,
+                                           Register fold_map,
+                                           Register tmp) {
+    Label DONE;
+
+    assert_different_registers(code_point, result, page_index, fold_map, tmp);
+    __ lsrw(tmp, code_point, string_case_page_shift);
+    __ ldrb(tmp, Address(page_index, tmp));
+    __ lslw(tmp, tmp, string_case_page_shift);
+    __ andw(result, code_point, string_case_page_mask);
+    __ orrw(tmp, tmp, result);
+    __ ldrw(result, Address(fold_map, tmp, Address::lsl(2)));
+    __ cbnzw(result, DONE);
+    __ movw(result, code_point);
+    __ bind(DONE);
+  }
+
+  void emit_string_equals_ignore_case_uu_scalar_full(
+      Register left, Register right, Register index,
+      Register batch_end, Register len,
+      Register left_char, Register right_char,
+      Register page_index, Register fold_map,
+      Register left_fold, Register right_fold, Register tmp,
+      Label& vector_loop, Label& match,
+      Label& mismatch, Label& checkpoint) {
+    Label LOOP, LEFT_BMP, LEFT_READY, RIGHT_BMP, RIGHT_READY,
+          COMMIT_ONE, COMMIT_DONE;
+
+    assert_different_registers(left, right, index, batch_end, len,
+                               left_char, right_char, page_index, fold_map,
+                               left_fold, right_fold, tmp);
+
+    __ mov(page_index,
+           reinterpret_cast<uint64_t>(string_case_fold_page_index));
+    __ mov(fold_map, reinterpret_cast<uint64_t>(string_case_fold_map));
+
+    __ bind(LOOP);
+    __ ldrh(left_char, Address(left));
+    __ ldrh(right_char, Address(right));
+
+    // Classify and decode the left code point.  Values outside the surrogate
+    // range are BMP; a low surrogate or an unpaired high surrogate resumes at
+    // the current, still-uncommitted code-unit index.
+    __ movw(tmp, 0xd800);
+    __ subw(left_fold, left_char, tmp);
+    __ cmpw(left_fold, 0x800);
+    __ br(Assembler::HS, LEFT_BMP);
+    __ cmpw(left_fold, 0x400);
+    __ br(Assembler::HS, checkpoint);
+    __ addw(tmp, index, 1);
+    __ cmpw(tmp, len);
+    __ br(Assembler::HS, checkpoint);
+    __ ldrh(left_char, Address(left, sizeof(jchar)));
+    __ movw(tmp, 0xdc00);
+    __ subw(left_char, left_char, tmp);
+    __ cmpw(left_char, 0x400);
+    __ br(Assembler::HS, checkpoint);
+    __ lslw(left_fold, left_fold, 10);
+    __ addw(left_char, left_fold, left_char);
+    __ movw(tmp, 0x10000);
+    __ addw(left_char, left_char, tmp);
+    __ movw(left_fold, 2);
+    __ b(LEFT_READY);
+
+    __ bind(LEFT_BMP);
+    __ movw(left_fold, 1);
+
+    __ bind(LEFT_READY);
+    // Decode the right side before committing either cursor.  left_fold and
+    // right_fold temporarily carry widths, so a pair/BMP structural mismatch
+    // is definitive without consuming either input.
+    __ movw(tmp, 0xd800);
+    __ subw(right_fold, right_char, tmp);
+    __ cmpw(right_fold, 0x800);
+    __ br(Assembler::HS, RIGHT_BMP);
+    __ cmpw(right_fold, 0x400);
+    __ br(Assembler::HS, checkpoint);
+    __ addw(tmp, index, 1);
+    __ cmpw(tmp, len);
+    __ br(Assembler::HS, checkpoint);
+    __ ldrh(right_char, Address(right, sizeof(jchar)));
+    __ movw(tmp, 0xdc00);
+    __ subw(right_char, right_char, tmp);
+    __ cmpw(right_char, 0x400);
+    __ br(Assembler::HS, checkpoint);
+    __ lslw(right_fold, right_fold, 10);
+    __ addw(right_char, right_fold, right_char);
+    __ movw(tmp, 0x10000);
+    __ addw(right_char, right_char, tmp);
+    __ movw(right_fold, 2);
+    __ b(RIGHT_READY);
+
+    __ bind(RIGHT_BMP);
+    __ movw(right_fold, 1);
+
+    __ bind(RIGHT_READY);
+    __ cmpw(left_fold, right_fold);
+    __ br(Assembler::NE, mismatch);
+
+    emit_string_equals_ignore_case_fold(left_char, left_fold,
+                                        page_index, fold_map, tmp);
+    emit_string_equals_ignore_case_fold(right_char, right_fold,
+                                        page_index, fold_map, tmp);
+    __ cmpw(left_fold, right_fold);
+    __ br(Assembler::NE, mismatch);
+
+    __ movw(tmp, 0x10000);
+    __ cmpw(left_char, tmp);
+    __ br(Assembler::LO, COMMIT_ONE);
+    __ add(left, left, 2 * sizeof(jchar));
+    __ add(right, right, 2 * sizeof(jchar));
+    __ addw(index, index, 2);
+    __ b(COMMIT_DONE);
+
+    __ bind(COMMIT_ONE);
+    __ add(left, left, sizeof(jchar));
+    __ add(right, right, sizeof(jchar));
+    __ addw(index, index, 1);
+
+    __ bind(COMMIT_DONE);
+    __ cmpw(index, batch_end);
+    __ br(Assembler::LT, LOOP);
+    __ cmpw(index, len);
+    __ br(Assembler::GE, match);
+    __ b(vector_loop);
+  }
+
+  void emit_string_equals_ignore_case_sve_fold(
+      FloatRegister code_point, FloatRegister page,
+      FloatRegister slot, FloatRegister folded,
+      Register page_index, Register fold_map,
+      PRegister active, PRegister mapped) {
+    assert(active->is_governing() && mapped->is_governing(),
+           "SVE fold predicates must be governing registers");
+
+    __ sve_lsr(page, Assembler::S, code_point, string_case_page_shift);
+    __ sve_ld1b_gather(slot, active, page_index, page);
+    __ sve_lsl(slot, Assembler::S, slot, string_case_page_shift);
+    __ sve_orr(page, code_point, code_point);
+    __ sve_and(page, Assembler::S, string_case_page_mask);
+    __ sve_orr(slot, slot, page);
+    __ sve_ld1w_gather(folded, active, fold_map, slot);
+    __ sve_cmp(Assembler::NE, mapped, Assembler::S,
+               active, folded, 0);
+    __ sve_sel(folded, Assembler::S, mapped, folded, code_point);
+  }
+
+  void emit_string_equals_ignore_case_sve_uu_tag(
+      FloatRegister raw, FloatRegister next, FloatRegister previous,
+      FloatRegister tag, FloatRegister raw_class,
+      FloatRegister neighbor_class, PRegister active,
+      PRegister pair_start, PRegister continuation,
+      PRegister scratch) {
+    // pair_start, continuation, and scratch are temporary predicates and are
+    // all clobbered on return; pair_start finishes as their valid-pair union.
+    assert(active->is_governing() && pair_start->is_governing() &&
+           continuation->is_governing() && scratch->is_governing(),
+           "SVE UU tag predicates must be governing registers");
+
+    // After shifting by ten, high and low surrogates are classes 0x36 and
+    // 0x37.  Subtracting 0x36 makes them the compact tag classes 0 and 1.
+    __ sve_lsr(raw_class, Assembler::H, raw, 10);
+    __ sve_sub(raw_class, Assembler::H, 0x36);
+
+    __ sve_lsr(neighbor_class, Assembler::H, next, 10);
+    __ sve_sub(neighbor_class, Assembler::H, 0x36);
+    __ sve_cmp(Assembler::EQ, pair_start, Assembler::H,
+               active, raw_class, 0);
+    __ sve_cmp(Assembler::EQ, scratch, Assembler::H,
+               active, neighbor_class, 1);
+    __ sve_and(pair_start, active, pair_start, scratch);
+
+    __ sve_lsr(neighbor_class, Assembler::H, previous, 10);
+    __ sve_sub(neighbor_class, Assembler::H, 0x36);
+    __ sve_cmp(Assembler::EQ, continuation, Assembler::H,
+               active, raw_class, 1);
+    __ sve_cmp(Assembler::EQ, scratch, Assembler::H,
+               active, neighbor_class, 0);
+    __ sve_and(continuation, active, continuation, scratch);
+
+    // Materialize the complete structure state in a caller-saved Z register:
+    // 0 = BMP, 1 = pair start, 2 = continuation, 3 = malformed/boundary.
+    __ sve_dup(tag, Assembler::H, 0);
+    __ sve_cpy(tag, Assembler::H, pair_start, 1, true);
+    __ sve_cpy(tag, Assembler::H, continuation, 2, true);
+    __ sve_cmp(Assembler::LS, scratch, Assembler::H,
+               active, raw_class, 1);
+    __ sve_orr(pair_start, active, pair_start, continuation);
+    __ sve_bic(scratch, active, scratch, pair_start);
+    __ sve_cpy(tag, Assembler::H, scratch, 3, true);
+  }
+
+  void emit_string_equals_ignore_case_sve_uu() {
+    static_assert(string_case_identity_sentinel == 0,
+                  "zero fold entries must denote identity");
+
+    Register result = r0, left = r3, right = r4, index = r5,
+             left_char = r6, right_char = r7,
+             page_index = r8, fold_map = r9,
+             left_fold_gpr = r10, right_fold_gpr = r11,
+             tmp = r12, batch_end = r13, len = r2;
+
+    FloatRegister left_raw = z0, right_raw = z1,
+                  left_next = z2, right_next = z3,
+                  left_tag = z4, right_tag = z5,
+                  left_previous = z6, right_previous = z7,
+                  scratch0 = z16, scratch1 = z17,
+                  left_code_point = z18, right_code_point = z19,
+                  left_next_wide = z20, right_next_wide = z21,
+                  left_decoded = z22, right_decoded = z23,
+                  decode_bias = z24,
+                  left_fold = z25, right_fold = z26,
+                  page = z27, slot = z28;
+
+    PRegister active = p0, code_point_start = p1,
+              lookup = p2, scratch = p3;
+
+    Label VECTOR_LOOP, VECTOR_COMMIT, BMP_LOOKUP, SURROGATE_STRUCTURE,
+          SCALAR_TAIL, SCALAR_RESCAN, MATCH, MISMATCH, CHECKPOINT;
+
+    assert_different_registers(result, r1, len, left, right, index,
+                               left_char, right_char, page_index, fold_map,
+                               left_fold_gpr, right_fold_gpr, tmp, batch_end);
+#ifdef ASSERT
+    const FloatRegSet vector_scratch =
+        FloatRegSet::range(v0, v7) + FloatRegSet::range(v16, v28);
+    const FloatRegSet callee_saved = FloatRegSet::range(v8, v15);
+    assert((vector_scratch.bits() & callee_saved.bits()) == 0,
+           "equalsIgnoreCase SVE UU scratch must be caller-saved");
+    assert(active->is_governing() && code_point_start->is_governing() &&
+           lookup->is_governing() && scratch->is_governing(),
+           "equalsIgnoreCase SVE UU predicates must be governing");
+    assert(active != p7 && code_point_start != p7 &&
+           lookup != p7 && scratch != p7,
+           "equalsIgnoreCase must preserve the HotSpot ptrue predicate");
+#endif
+
+    __ mov(left, r0);
+    __ mov(right, r1);
+    __ cmpw(len, 0);
+    __ br(Assembler::LE, MATCH);
+    __ uxtw(len, len);
+    __ mov(index, zr);
+
+    __ bind(VECTOR_LOOP);
+    __ sve_whilelo(active, Assembler::H, index, len);
+    __ sve_ptest(active, active);
+    __ br(Assembler::EQ, MATCH);
+    __ sve_cntp(tmp, Assembler::H, active, active);
+    __ sve_cnth(left_char);
+    __ cmp(tmp, left_char);
+    __ br(Assembler::LT, SCALAR_TAIL);
+    __ add(batch_end, index, tmp);
+
+    __ sve_ld1h(left_raw, Assembler::H, active, Address(left));
+    __ sve_ld1h(right_raw, Assembler::H, active, Address(right));
+
+    // Preserve raw equality, then route any surrogate-bearing chunk through
+    // structure validation before running the common-safe classifier.
+    // Raw-equal surrogates must not bypass malformed checks.
+    __ sve_cmp(Assembler::EQ, code_point_start, Assembler::H,
+               active, left_raw, right_raw);
+
+    __ sve_lsr(scratch0, Assembler::H, left_raw, 11);
+    __ sve_sub(scratch0, Assembler::H, 0x1b);
+    __ sve_cmp(Assembler::EQ, lookup, Assembler::H,
+               active, scratch0, 0);
+    __ sve_lsr(scratch0, Assembler::H, right_raw, 11);
+    __ sve_sub(scratch0, Assembler::H, 0x1b);
+    __ sve_cmp(Assembler::EQ, scratch, Assembler::H,
+               active, scratch0, 0);
+    __ sve_orr(lookup, active, lookup, scratch);
+    __ sve_ptest(active, lookup);
+    __ br(Assembler::NE, SURROGATE_STRUCTURE);
+
+    __ sve_orr(left_next, left_raw, left_raw);
+    __ sve_orr(left_next, Assembler::H, 0x20);
+    __ sve_orr(right_next, right_raw, right_raw);
+    __ sve_orr(right_next, Assembler::H, 0x20);
+    // The SVE classifier recognizes exactly the three legal canonical
+    // Latin1 ranges: a-z, e0-f6, and f8-fe.
+    __ sve_orr(left_tag, left_next, left_next);
+    __ sve_sub(left_tag, Assembler::H, 'a');
+    __ sve_cmp(Assembler::LS, lookup, Assembler::H,
+               active, left_tag, 'z' - 'a');
+    __ sve_orr(left_tag, left_next, left_next);
+    __ sve_sub(left_tag, Assembler::H, 0xe0);
+    __ sve_cmp(Assembler::LS, scratch, Assembler::H,
+               active, left_tag, 0xf6 - 0xe0);
+    __ sve_orr(lookup, active, lookup, scratch);
+    __ sve_orr(left_tag, left_next, left_next);
+    __ sve_sub(left_tag, Assembler::H, 0xf8);
+    __ sve_cmp(Assembler::LS, scratch, Assembler::H,
+               active, left_tag, 0xfe - 0xf8);
+    __ sve_orr(lookup, active, lookup, scratch);
+    __ sve_cmp(Assembler::EQ, scratch, Assembler::H,
+               active, left_next, right_next);
+    __ sve_and(lookup, active, lookup, scratch);
+    __ sve_orr(code_point_start, active, code_point_start, lookup);
+    __ sve_bic(scratch, active, active, code_point_start);
+    __ sve_ptest(active, scratch);
+    __ br(Assembler::EQ, VECTOR_COMMIT);
+
+    __ bind(BMP_LOOKUP);
+    __ mov(page_index,
+           reinterpret_cast<uint64_t>(string_case_fold_page_index));
+    __ mov(fold_map, reinterpret_cast<uint64_t>(string_case_fold_map));
+    __ sve_punpklo(lookup, active);
+    __ sve_uunpklo(left_code_point, Assembler::S, left_raw);
+    __ sve_uunpklo(right_code_point, Assembler::S, right_raw);
+    emit_string_equals_ignore_case_sve_fold(
+        left_code_point, page, slot, left_fold,
+        page_index, fold_map, lookup, scratch);
+    emit_string_equals_ignore_case_sve_fold(
+        right_code_point, page, slot, right_fold,
+        page_index, fold_map, lookup, scratch);
+    __ sve_cmp(Assembler::NE, scratch, Assembler::S,
+               lookup, left_fold, right_fold);
+    __ sve_ptest(lookup, scratch);
+    __ br(Assembler::NE, MISMATCH);
+
+    __ sve_punpkhi(lookup, active);
+    __ sve_uunpkhi(left_code_point, Assembler::S, left_raw);
+    __ sve_uunpkhi(right_code_point, Assembler::S, right_raw);
+    emit_string_equals_ignore_case_sve_fold(
+        left_code_point, page, slot, left_fold,
+        page_index, fold_map, lookup, scratch);
+    emit_string_equals_ignore_case_sve_fold(
+        right_code_point, page, slot, right_fold,
+        page_index, fold_map, lookup, scratch);
+    __ sve_cmp(Assembler::NE, scratch, Assembler::S,
+               lookup, left_fold, right_fold);
+    __ sve_ptest(lookup, scratch);
+    __ br(Assembler::NE, MISMATCH);
+    __ b(VECTOR_COMMIT);
+
+    // INDEX/TBL form VLA successor and predecessor vectors.  Out-of-range
+    // table indices read as zero, deliberately tagging a high surrogate at
+    // the final lane (or a low surrogate at lane zero) as a scalar rescan.
+    __ bind(SURROGATE_STRUCTURE);
+    __ sve_index(scratch0, Assembler::H, 1, 1);
+    __ sve_tbl(left_next, Assembler::H, left_raw, scratch0);
+    __ sve_tbl(right_next, Assembler::H, right_raw, scratch0);
+    __ sve_index(scratch1, Assembler::H, -1, 1);
+    __ sve_tbl(left_previous, Assembler::H, left_raw, scratch1);
+    __ sve_tbl(right_previous, Assembler::H, right_raw, scratch1);
+
+    emit_string_equals_ignore_case_sve_uu_tag(
+        left_raw, left_next, left_previous, left_tag,
+        scratch0, scratch1, active,
+        code_point_start, lookup, scratch);
+    emit_string_equals_ignore_case_sve_uu_tag(
+        right_raw, right_next, right_previous, right_tag,
+        scratch0, scratch1, active,
+        code_point_start, lookup, scratch);
+
+    // Malformed or boundary structure must be resolved in code-point order
+    // before a later vector mismatch can become observable.
+    __ sve_cmp(Assembler::EQ, lookup, Assembler::H,
+               active, left_tag, 3);
+    __ sve_cmp(Assembler::EQ, scratch, Assembler::H,
+               active, right_tag, 3);
+    __ sve_orr(lookup, active, lookup, scratch);
+    __ sve_ptest(active, lookup);
+    __ br(Assembler::NE, SCALAR_RESCAN);
+
+    __ sve_cmp(Assembler::NE, lookup, Assembler::H,
+               active, left_tag, right_tag);
+    __ sve_ptest(active, lookup);
+    __ br(Assembler::NE, MISMATCH);
+
+    // Once structure is valid, a completely raw-equal chunk needs neither
+    // decoding nor the full-Unicode table gathers.
+    __ sve_cmp(Assembler::NE, lookup, Assembler::H,
+               active, left_raw, right_raw);
+    __ sve_ptest(active, lookup);
+    __ br(Assembler::EQ, VECTOR_COMMIT);
+
+    // Tags 0 (BMP) and 1 (pair start) are code-point starts.  Keep this H
+    // predicate live while its low and high halves are unpacked to S lanes;
+    // continuation lanes never participate in a gather or comparison.
+    __ sve_cmp(Assembler::NE, code_point_start, Assembler::H,
+               active, left_tag, 2);
+    __ mov(page_index,
+           reinterpret_cast<uint64_t>(string_case_fold_page_index));
+    __ mov(fold_map, reinterpret_cast<uint64_t>(string_case_fold_map));
+    __ movw(tmp, 0x035fdc00);
+    __ sve_dup(decode_bias, Assembler::S, tmp);
+
+    __ sve_punpklo(lookup, code_point_start);
+    __ sve_cmp(Assembler::EQ, scratch, Assembler::H,
+               active, left_tag, 1);
+    __ sve_punpklo(scratch, scratch);
+    __ sve_uunpklo(left_code_point, Assembler::S, left_raw);
+    __ sve_uunpklo(left_next_wide, Assembler::S, left_next);
+    __ sve_lsl(left_decoded, Assembler::S, left_code_point, 10);
+    __ sve_add(left_decoded, Assembler::S,
+               left_decoded, left_next_wide);
+    __ sve_sub(left_decoded, Assembler::S, left_decoded, decode_bias);
+    __ sve_sel(left_code_point, Assembler::S, scratch,
+               left_decoded, left_code_point);
+    __ sve_uunpklo(right_code_point, Assembler::S, right_raw);
+    __ sve_uunpklo(right_next_wide, Assembler::S, right_next);
+    __ sve_lsl(right_decoded, Assembler::S, right_code_point, 10);
+    __ sve_add(right_decoded, Assembler::S,
+               right_decoded, right_next_wide);
+    __ sve_sub(right_decoded, Assembler::S, right_decoded, decode_bias);
+    __ sve_sel(right_code_point, Assembler::S, scratch,
+               right_decoded, right_code_point);
+    emit_string_equals_ignore_case_sve_fold(
+        left_code_point, page, slot, left_fold,
+        page_index, fold_map, lookup, scratch);
+    emit_string_equals_ignore_case_sve_fold(
+        right_code_point, page, slot, right_fold,
+        page_index, fold_map, lookup, scratch);
+    __ sve_cmp(Assembler::NE, scratch, Assembler::S,
+               lookup, left_fold, right_fold);
+    __ sve_ptest(lookup, scratch);
+    __ br(Assembler::NE, MISMATCH);
+
+    __ sve_punpkhi(lookup, code_point_start);
+    __ sve_cmp(Assembler::EQ, scratch, Assembler::H,
+               active, left_tag, 1);
+    __ sve_punpkhi(scratch, scratch);
+    __ sve_uunpkhi(left_code_point, Assembler::S, left_raw);
+    __ sve_uunpkhi(left_next_wide, Assembler::S, left_next);
+    __ sve_lsl(left_decoded, Assembler::S, left_code_point, 10);
+    __ sve_add(left_decoded, Assembler::S,
+               left_decoded, left_next_wide);
+    __ sve_sub(left_decoded, Assembler::S, left_decoded, decode_bias);
+    __ sve_sel(left_code_point, Assembler::S, scratch,
+               left_decoded, left_code_point);
+    __ sve_uunpkhi(right_code_point, Assembler::S, right_raw);
+    __ sve_uunpkhi(right_next_wide, Assembler::S, right_next);
+    __ sve_lsl(right_decoded, Assembler::S, right_code_point, 10);
+    __ sve_add(right_decoded, Assembler::S,
+               right_decoded, right_next_wide);
+    __ sve_sub(right_decoded, Assembler::S, right_decoded, decode_bias);
+    __ sve_sel(right_code_point, Assembler::S, scratch,
+               right_decoded, right_code_point);
+    emit_string_equals_ignore_case_sve_fold(
+        left_code_point, page, slot, left_fold,
+        page_index, fold_map, lookup, scratch);
+    emit_string_equals_ignore_case_sve_fold(
+        right_code_point, page, slot, right_fold,
+        page_index, fold_map, lookup, scratch);
+    __ sve_cmp(Assembler::NE, scratch, Assembler::S,
+               lookup, left_fold, right_fold);
+    __ sve_ptest(lookup, scratch);
+    __ br(Assembler::NE, MISMATCH);
+
+    __ bind(VECTOR_COMMIT);
+    __ sub(tmp, batch_end, index);
+    __ add(left, left, tmp, Assembler::LSL, 1);
+    __ add(right, right, tmp, Assembler::LSL, 1);
+    __ mov(index, batch_end);
+    __ b(VECTOR_LOOP);
+
+    __ bind(SCALAR_TAIL);
+    __ cmp(index, len);
+    __ br(Assembler::GE, MATCH);
+    __ mov(batch_end, len);
+    __ bind(SCALAR_RESCAN);
+    emit_string_equals_ignore_case_uu_scalar_full(
+        left, right, index, batch_end, len,
+        left_char, right_char, page_index, fold_map,
+        left_fold_gpr, right_fold_gpr, tmp,
+        VECTOR_LOOP, MATCH, MISMATCH, CHECKPOINT);
+
+    __ bind(MATCH);
+    __ movw(result, -1);
+    __ ret(lr);
+
+    __ bind(MISMATCH);
+    __ movw(result, -2);
+    __ ret(lr);
+
+    __ bind(CHECKPOINT);
+    __ movw(result, index);
+    __ ret(lr);
+  }
+
+  void emit_string_equals_ignore_case_sve(string_compare_mode mode) {
+    static_assert(string_case_identity_sentinel == 0,
+                  "zero fold entries must denote identity");
+
+    const bool left_is_latin1 = mode != UU;
+    const bool right_is_latin1 = mode == LL;
+    const int left_shift = left_is_latin1 ? 0 : 1;
+    const int right_shift = right_is_latin1 ? 0 : 1;
+    const Assembler::SIMD_RegVariant element =
+        mode == LL ? Assembler::B : Assembler::H;
+
+    Register result = r0, left = r3, right = r4, index = r5,
+             page_index = r8, fold_map = r9,
+             tmp = r12, batch_end = r13, len = r2;
+
+    FloatRegister left_raw = z0, right_raw = z1,
+                  left_work = z2, right_work = z3,
+                  range_or_class = z4,
+                  left_code_point = z16, right_code_point = z17,
+                  left_fold = z18, right_fold = z19,
+                  page = z20, slot = z21;
+
+    PRegister active = p0, safe = p1,
+              auxiliary = p2, scratch = p3;
+
+    Label VECTOR_LOOP, VECTOR_ADVANCE, BMP_LOOKUP, MATCH, MISMATCH;
+
+    assert_different_registers(result, r1, len, left, right, index,
+                               page_index, fold_map, tmp, batch_end);
+#ifdef ASSERT
+    const FloatRegSet vector_scratch =
+        FloatRegSet::of(left_raw, right_raw, left_work, right_work) +
+        range_or_class +
+        left_code_point + right_code_point + left_fold + right_fold +
+        page + slot;
+    const FloatRegSet callee_saved = FloatRegSet::range(v8, v15);
+    assert((vector_scratch.bits() & callee_saved.bits()) == 0,
+           "equalsIgnoreCase SVE scratch must be caller-saved");
+    assert(active->is_governing() && safe->is_governing() &&
+           auxiliary->is_governing() && scratch->is_governing(),
+           "equalsIgnoreCase SVE predicates must be governing registers");
+    assert(active != p7 && safe != p7 &&
+           auxiliary != p7 && scratch != p7,
+           "equalsIgnoreCase must preserve the HotSpot ptrue predicate");
+#endif
+
+    __ mov(left, r0);
+    __ mov(right, r1);
+    __ cmpw(len, 0);
+    __ br(Assembler::LE, MATCH);
+    __ uxtw(len, len);
+    __ mov(index, zr);
+
+    __ bind(VECTOR_LOOP);
+    __ sve_whilelo(active, element, index, len);
+    __ sve_ptest(active, active);
+    __ br(Assembler::EQ, MATCH);
+    __ sve_cntp(tmp, element, active, active);
+    __ add(batch_end, index, tmp);
+
+    if (mode == LL) {
+      __ sve_ld1b(left_raw, Assembler::B, active, Address(left));
+      __ sve_ld1b(right_raw, Assembler::B, active, Address(right));
+    } else {
+      assert(mode == LU, "only LL and LU use this emitter");
+      __ sve_ld1b(left_raw, Assembler::H, active, Address(left));
+      __ sve_ld1h(right_raw, Assembler::H, active, Address(right));
+    }
+
+    __ sve_cmp(Assembler::EQ, safe, element,
+               active, left_raw, right_raw);
+
+    __ sve_orr(left_work, left_raw, left_raw);
+    __ sve_orr(left_work, element, 0x20);
+    __ sve_orr(right_work, right_raw, right_raw);
+    __ sve_orr(right_work, element, 0x20);
+
+    __ sve_orr(range_or_class, left_work, left_work);
+    __ sve_sub(range_or_class, element, 'a');
+    __ sve_cmp(Assembler::LS, auxiliary, element,
+               active, range_or_class, 'z' - 'a');
+
+    __ sve_orr(range_or_class, left_work, left_work);
+    __ sve_sub(range_or_class, element, 0xe0);
+    __ sve_cmp(Assembler::LS, scratch, element,
+               active, range_or_class, 0xf6 - 0xe0);
+    __ sve_orr(auxiliary, active, auxiliary, scratch);
+
+    __ sve_orr(range_or_class, left_work, left_work);
+    __ sve_sub(range_or_class, element, 0xf8);
+    __ sve_cmp(Assembler::LS, scratch, element,
+               active, range_or_class, 0xfe - 0xf8);
+    __ sve_orr(auxiliary, active, auxiliary, scratch);
+
+    __ sve_cmp(Assembler::EQ, scratch, element,
+               active, left_work, right_work);
+    __ sve_and(auxiliary, active, auxiliary, scratch);
+    __ sve_orr(safe, active, safe, auxiliary);
+
+    __ sve_bic(scratch, active, active, safe);
+    __ sve_ptest(active, scratch);
+    __ br(Assembler::EQ, VECTOR_ADVANCE);
+
+    if (mode == LL) {
+      __ b(MISMATCH);
+    } else {
+      __ b(BMP_LOOKUP);
+    }
+
+    if (mode != LL) {
+      __ bind(BMP_LOOKUP);
+      // Reload the original LU code units before the exact BMP lookup.
+      __ sve_ld1b(left_raw, Assembler::H, active, Address(left));
+      __ sve_ld1h(right_raw, Assembler::H, active, Address(right));
+      __ mov(page_index,
+             reinterpret_cast<uint64_t>(string_case_fold_page_index));
+      __ mov(fold_map,
+             reinterpret_cast<uint64_t>(string_case_fold_map));
+
+      __ sve_punpklo(auxiliary, active);
+      __ sve_uunpklo(left_code_point, Assembler::S, left_raw);
+      __ sve_uunpklo(right_code_point, Assembler::S, right_raw);
+      emit_string_equals_ignore_case_sve_fold(
+          left_code_point, page, slot, left_fold,
+          page_index, fold_map, auxiliary, scratch);
+      emit_string_equals_ignore_case_sve_fold(
+          right_code_point, page, slot, right_fold,
+          page_index, fold_map, auxiliary, scratch);
+      __ sve_cmp(Assembler::NE, scratch, Assembler::S,
+                 auxiliary, left_fold, right_fold);
+      __ sve_ptest(auxiliary, scratch);
+      __ br(Assembler::NE, MISMATCH);
+
+      __ sve_punpkhi(auxiliary, active);
+      __ sve_uunpkhi(left_code_point, Assembler::S, left_raw);
+      __ sve_uunpkhi(right_code_point, Assembler::S, right_raw);
+      emit_string_equals_ignore_case_sve_fold(
+          left_code_point, page, slot, left_fold,
+          page_index, fold_map, auxiliary, scratch);
+      emit_string_equals_ignore_case_sve_fold(
+          right_code_point, page, slot, right_fold,
+          page_index, fold_map, auxiliary, scratch);
+      __ sve_cmp(Assembler::NE, scratch, Assembler::S,
+                 auxiliary, left_fold, right_fold);
+      __ sve_ptest(auxiliary, scratch);
+      __ br(Assembler::NE, MISMATCH);
+      __ b(VECTOR_ADVANCE);
+    }
+
+    __ bind(VECTOR_ADVANCE);
+    if (left_shift == 0) {
+      __ add(left, left, tmp);
+    } else {
+      __ add(left, left, tmp, Assembler::LSL, left_shift);
+    }
+    if (right_shift == 0) {
+      __ add(right, right, tmp);
+    } else {
+      __ add(right, right, tmp, Assembler::LSL, right_shift);
+    }
+    __ mov(index, batch_end);
+    __ b(VECTOR_LOOP);
+
+    __ bind(MATCH);
+    __ movw(result, -1);
+    __ ret(lr);
+
+    __ bind(MISMATCH);
+    __ movw(result, -2);
+    __ ret(lr);
+  }
+
+  // r0: address of the first string and result
+  // r1: address of the second string
+  // r2: number of code units
+  //
+  // Returns -1 for a match, -2 for a definite mismatch, or the relative
+  // code-unit index at which the Java scalar suffix must resume.
+  // The SVE implementation clobbers r2-r13, z0-z7, z16-z28, p0-p3, and
+  // NZCV while preserving p7.
+  address generate_string_equals_ignore_case(string_compare_mode mode) {
+    const char* name;
+    OptimizationId optimization_id = number_of_optimization_ids;
+    switch (mode) {
+      case LL:
+        name = "string_equals_ignore_case_ll";
+        optimization_id = string_equals_ignore_case_ll;
+        break;
+      case LU:
+        name = "string_equals_ignore_case_lu";
+        optimization_id = string_equals_ignore_case_lu;
+        break;
+      case UU:
+        name = "string_equals_ignore_case_uu";
+        optimization_id = string_equals_ignore_case_uu;
+        break;
+      default:
+        ShouldNotReachHere();
+    }
+
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", name);
+    address entry = __ pc();
+
+    record_optimization_hit(optimization_id);
+
+    if (mode == UU) {
+      emit_string_equals_ignore_case_sve_uu();
+    } else {
+      emit_string_equals_ignore_case_sve(mode);
+    }
+    return entry;
+  }
+
   // The following registers are declared in aarch64.ad
   // r0  = result
   // r1  = str1
@@ -7007,6 +8415,602 @@ class StubGenerator: public StubCodeGenerator {
     StubRoutines::aarch64::_string_indexof_linear_ll = generate_string_indexof_linear(true, true);
     StubRoutines::aarch64::_string_indexof_linear_uu = generate_string_indexof_linear(false, false);
     StubRoutines::aarch64::_string_indexof_linear_ul = generate_string_indexof_linear(true, false);
+  }
+
+  // Entry:
+  //   r0 = source byte address at first character
+  //   r1 = destination byte address at first character
+  //   r2 = first character index in the original String
+  //   r3 = number of characters to process
+  //
+  // Return:
+  //   Latin1 success: original String length
+  //   Latin1 fallback: first character requiring expansion or a non-Latin1 result
+  //   UTF16 success: non-negative coder marker; values > 0xff force UTF16
+  //   UTF16 fallback: -(first character requiring special handling + 1)
+  // Packed bytes are listed low byte first in the comments below.
+  // 40 5b 5c 5d 5e 5f d7 df: values excluded from the lowercase delta.
+  static constexpr uint64_t latin1_lower_sve2_non_case_bytes =
+      0xdfd75f5e5d5c5b40ULL;
+  // 60 7b 7c 7d 7e 7f f7 ff: values excluded from the uppercase delta.
+  static constexpr uint64_t latin1_upper_sve2_non_case_bytes =
+      0xfff77f7e7d7c7b60ULL;
+  // b5 df ff b5: values that require the Latin1 uppercase fallback.
+  static constexpr uint64_t latin1_upper_sve2_fallback_bytes = 0xb5ffdfb5ULL;
+  // A bit above the Latin1 range tells StringUTF16 to retain UTF16 storage.
+  static constexpr uint32_t string_case_wide_result_marker = 1U << 8;
+
+  static_assert(string_case_identity_sentinel == 0,
+                "CBZW requires a zero String case identity sentinel");
+
+  void emit_string_case_sve_lookup(FloatRegister codepoints,
+                                   FloatRegister pages,
+                                   FloatRegister indexes,
+                                   FloatRegister entries,
+                                   PRegister active,
+                                   PRegister mapped,
+                                   Register page_index,
+                                   Register map) {
+    __ sve_lsr(pages, Assembler::S, codepoints, string_case_page_shift);
+    __ sve_ld1b_gather(indexes, active, page_index, pages);
+    __ sve_lsl(indexes, Assembler::S, indexes, string_case_page_shift);
+    __ sve_orr(pages, codepoints, codepoints);
+    __ sve_and(pages, Assembler::S, string_case_page_mask);
+    __ sve_orr(indexes, indexes, pages);
+    __ sve_ld1h_gather(entries, active, map, indexes);
+
+    __ sve_cmp(Assembler::NE, mapped, Assembler::S, active, entries,
+               string_case_identity_sentinel);
+    __ sve_sel(entries, Assembler::S, mapped, entries, codepoints);
+  }
+
+#ifdef ASSERT
+  void assert_string_case_vector_scratch(FloatRegSet scratch) {
+    const FloatRegSet callee_saved = FloatRegSet::range(v8, v15);
+    assert((scratch.bits() & callee_saved.bits()) == 0,
+           "string case scratch vector registers must be caller-saved");
+  }
+#endif
+
+  void emit_string_case_latin1_lower_sve(Label& done) {
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister ext_lower_bound = v2;
+    FloatRegister ext_upper_bound = v3;
+    FloatRegister excluded_value = v4;
+    PRegister active = p0;
+    PRegister range = p1;
+    PRegister upper = p2;
+    PRegister ext_range = p3;
+    PRegister ext_upper = p4;
+    PRegister not_excluded = p5;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, ext_lower_bound, ext_upper_bound) +
+        excluded_value);
+#endif
+
+    Label vector_loop, latin1_setup, latin1_vector_loop, latin1_vector_body;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 0x7f);
+      __ br(Assembler::NE, latin1_setup);
+
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'A' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'Z');
+      __ sve_add(raw, Assembler::B, upper, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+
+    __ bind(latin1_setup);
+      __ sve_dup(ext_lower_bound, Assembler::B, -65);
+      __ sve_dup(ext_upper_bound, Assembler::B, -34);
+      __ sve_dup(excluded_value, Assembler::B, -41);
+      __ b(latin1_vector_body);
+
+    __ bind(latin1_vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+
+    __ bind(latin1_vector_body);
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'A' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'Z');
+      __ sve_cmp(Assembler::HI, ext_range, Assembler::B, active, raw,
+                 ext_lower_bound);
+      __ sve_cmp(Assembler::HS, ext_upper, Assembler::B, ext_range,
+                 ext_upper_bound, raw);
+      __ sve_cmp(Assembler::NE, not_excluded, Assembler::B, ext_upper,
+                 raw, excluded_value);
+      __ sve_orr(range, active, upper, not_excluded);
+      __ sve_add(raw, Assembler::B, range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(latin1_vector_loop);
+  }
+
+  void emit_string_case_latin1_upper_sve(Label& scalar_loop, Label& done) {
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister ext_lower_bound = v2;
+    FloatRegister ext_upper_bound = v3;
+    FloatRegister excluded_value = v4;
+    FloatRegister special_value = v5;
+    PRegister active = p0;
+    PRegister range = p1;
+    PRegister upper = p2;
+    PRegister ext_range = p3;
+    PRegister not_excluded = p5;
+    PRegister special = p6;
+    PRegister special_tmp = p4;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, ext_lower_bound, ext_upper_bound) +
+        excluded_value + special_value);
+    assert(special_tmp != ptrue,
+           "string case scratch predicate register must not alias ptrue");
+#endif
+
+    Label vector_loop, latin1_setup, latin1_vector_loop, latin1_vector_body;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 0x7f);
+      __ br(Assembler::NE, latin1_setup);
+
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'a' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'z');
+      __ sve_sub(raw, Assembler::B, upper, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+
+    __ bind(latin1_setup);
+      __ sve_dup(ext_lower_bound, Assembler::B, -33);
+      __ sve_dup(ext_upper_bound, Assembler::B, -2);
+      __ sve_dup(excluded_value, Assembler::B, -9);
+      __ sve_dup(special_value, Assembler::B, -75);
+      __ b(latin1_vector_body);
+
+    __ bind(latin1_vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+
+    __ bind(latin1_vector_body);
+      __ sve_cmp(Assembler::EQ, special, Assembler::B, active, raw, special_value);
+      __ sve_cmp(Assembler::EQ, special_tmp, Assembler::B, active, raw, ext_lower_bound);
+      __ sve_orr(special, active, special, special_tmp);
+      __ sve_cmp(Assembler::HI, special_tmp, Assembler::B, active, raw, ext_upper_bound);
+      __ sve_orrs(special, active, special, special_tmp);
+      __ br(Assembler::NE, scalar_loop);
+
+      __ sve_cmp(Assembler::HI, range, Assembler::B, active, raw, 'a' - 1);
+      __ sve_cmp(Assembler::LS, upper, Assembler::B, range, raw, 'z');
+      __ sve_cmp(Assembler::HI, ext_range, Assembler::B, active, raw,
+                 ext_lower_bound);
+      __ sve_cmp(Assembler::NE, not_excluded, Assembler::B, ext_range,
+                 raw, excluded_value);
+      __ sve_orr(range, active, upper, not_excluded);
+      __ sve_sub(raw, Assembler::B, range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(latin1_vector_loop);
+  }
+
+  void emit_string_case_latin1_lower_sve2(Label& done) {
+    assert(UseSVE >= 2 && VM_Version::supports_svebitperm(),
+           "SVE2 string case backend requires SVE BitPerm");
+
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+    Register tmp = rscratch1;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister class_mask = v2;
+    FloatRegister class_bits = v3;
+    FloatRegister exceptions = v4;
+    PRegister active = p0;
+    PRegister broad_range = p1;
+    PRegister case_range = p2;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, class_mask, class_bits) +
+        exceptions);
+#endif
+
+    Label vector_loop;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+    __ sve_dup(class_mask, Assembler::B, 0x60);
+    __ mov(tmp, latin1_lower_sve2_non_case_bytes);
+    __ sve_dup(exceptions, Assembler::D, tmp);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_bext(class_bits, Assembler::B, raw, class_mask);
+      __ sve_cmp(Assembler::EQ, broad_range, Assembler::B, active,
+                 class_bits, 2);
+      __ sve_nmatch(case_range, Assembler::B, broad_range, raw, exceptions);
+      __ sve_uqadd(raw, Assembler::B, case_range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+  }
+
+  void emit_string_case_latin1_upper_sve2(Label& scalar_loop, Label& done) {
+    assert(UseSVE >= 2 && VM_Version::supports_svebitperm(),
+           "SVE2 string case backend requires SVE BitPerm");
+
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+    Register tmp = rscratch1;
+
+    FloatRegister raw = v0;
+    FloatRegister case_bit = v1;
+    FloatRegister class_mask = v2;
+    FloatRegister class_bits = v3;
+    FloatRegister exceptions = v4;
+    FloatRegister special_values = v5;
+    PRegister active = p0;
+    PRegister broad_range = p1;
+    PRegister case_range = p2;
+    PRegister special = p3;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, case_bit, class_mask, class_bits) +
+        exceptions + special_values);
+#endif
+
+    Label vector_loop;
+
+    __ sve_dup(case_bit, Assembler::B, 0x20);
+    __ sve_dup(class_mask, Assembler::B, 0x60);
+    __ mov(tmp, latin1_upper_sve2_non_case_bytes);
+    __ sve_dup(exceptions, Assembler::D, tmp);
+    __ mov(tmp, latin1_upper_sve2_fallback_bytes);
+    __ sve_dup(special_values, Assembler::S, tmp);
+
+    __ bind(vector_loop);
+      __ sve_whilelt(active, Assembler::B, index, count);
+      __ br(Assembler::PL, done);
+      __ sve_ld1b(raw, Assembler::B, active, Address(src, index));
+      __ sve_match(special, Assembler::B, active, raw, special_values);
+      __ br(Assembler::NE, scalar_loop);
+      __ sve_bext(class_bits, Assembler::B, raw, class_mask);
+      __ sve_cmp(Assembler::EQ, broad_range, Assembler::B, active,
+                 class_bits, 3);
+      __ sve_nmatch(case_range, Assembler::B, broad_range, raw, exceptions);
+      __ sve_uqsub(raw, Assembler::B, case_range, case_bit);
+
+      __ sve_st1b(raw, Assembler::B, active, Address(dst, index));
+      __ sve_inc(index, Assembler::B);
+      __ b(vector_loop);
+  }
+
+  void emit_string_case_latin1_lower(StringCaseBackend backend, Label& done) {
+    if (backend == StringCaseBackend::sve2) {
+      emit_string_case_latin1_lower_sve2(done);
+    } else {
+      assert(backend == StringCaseBackend::sve, "unexpected String case backend");
+      emit_string_case_latin1_lower_sve(done);
+    }
+  }
+
+  void emit_string_case_latin1_upper(StringCaseBackend backend,
+                                      Label& scalar_loop, Label& done) {
+    if (backend == StringCaseBackend::sve2) {
+      emit_string_case_latin1_upper_sve2(scalar_loop, done);
+    } else {
+      assert(backend == StringCaseBackend::sve, "unexpected String case backend");
+      emit_string_case_latin1_upper_sve(scalar_loop, done);
+    }
+  }
+
+  void emit_string_case_utf16_sve(const uint8_t* case_page_index,
+                                   const uint16_t* case_map,
+                                   Label& scalar_loop, Label& done) {
+    Register src = r0;
+    Register dst = r1;
+    Register count = r3;
+    Register index = r9;
+    Register tmp = rscratch1;
+    Register vec_len = r14;
+    Register result_bits = r11;
+    Register page_index = r4;
+    Register map = r5;
+
+    FloatRegister raw = v0;
+    FloatRegister codepoints_lo = v1;
+    FloatRegister codepoints_hi = v2;
+    FloatRegister pages_lo = v3;
+    FloatRegister pages_hi = v4;
+    FloatRegister indexes_lo = v5;
+    FloatRegister indexes_hi = v6;
+    FloatRegister entries_lo = v7;
+    FloatRegister entries_hi = v16;
+    FloatRegister fallback_value = v17;
+    PRegister active = p0;
+    PRegister active_lo = p1;
+    PRegister active_hi = p2;
+    PRegister fallback = p3;
+    PRegister mapped = p4;
+    PRegister wide = p5;
+
+#ifdef ASSERT
+    assert_string_case_vector_scratch(
+        FloatRegSet::of(raw, codepoints_lo, codepoints_hi, pages_lo) +
+        pages_hi + indexes_lo + indexes_hi + entries_lo + entries_hi +
+        fallback_value);
+#endif
+
+    Label vector_loop, narrow_result;
+
+    __ mov(page_index, reinterpret_cast<uint64_t>(case_page_index));
+    __ mov(map, reinterpret_cast<uint64_t>(case_map));
+    __ movw(tmp, string_case_fallback_sentinel);
+    __ sve_dup(fallback_value, Assembler::H, tmp);
+    __ sve_cnth(vec_len);
+
+    __ bind(vector_loop);
+      __ cmp(index, count);
+      __ br(Assembler::GE, done);
+      __ sve_whilelt(active, Assembler::H, index, count);
+      __ sve_ld1h(raw, Assembler::H, active,
+                  Address(src, index, Address::lsl(1)));
+      __ sve_uunpklo(codepoints_lo, Assembler::S, raw);
+      __ sve_uunpkhi(codepoints_hi, Assembler::S, raw);
+      __ sve_punpklo(active_lo, active);
+      __ sve_punpkhi(active_hi, active);
+
+      emit_string_case_sve_lookup(
+          codepoints_lo, pages_lo, indexes_lo, entries_lo,
+          active_lo, mapped, page_index, map);
+      emit_string_case_sve_lookup(
+          codepoints_hi, pages_hi, indexes_hi, entries_hi,
+          active_hi, mapped, page_index, map);
+
+      __ sve_uzp1(raw, Assembler::H, entries_lo, entries_hi);
+      __ sve_cmp(Assembler::EQ, fallback, Assembler::H, active,
+                 raw, fallback_value);
+      __ br(Assembler::NE, scalar_loop);
+      __ sve_lsr(pages_lo, Assembler::H, raw, string_case_page_shift);
+      __ sve_cmp(Assembler::NE, wide, Assembler::H, active, pages_lo, 0);
+      __ br(Assembler::EQ, narrow_result);
+      __ movw(result_bits, string_case_wide_result_marker);
+      __ bind(narrow_result);
+
+      __ sve_st1h(raw, Assembler::H, active,
+                  Address(dst, index, Address::lsl(1)));
+      __ add(index, index, vec_len);
+      __ b(vector_loop);
+  }
+
+  address generate_string_case_convert(bool is_latin1, bool to_lower,
+                                       StringCaseBackend backend,
+                                       const char* name) {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", name);
+    address entry = __ pc();
+
+    const OptimizationId optimization_id = is_latin1
+        ? (to_lower ? string_case_latin1_lower : string_case_latin1_upper)
+        : (to_lower ? string_case_utf16_lower : string_case_utf16_upper);
+    record_optimization_hit(optimization_id);
+
+    Register src = r0;
+    Register dst = r1;
+    Register first = r2;
+    Register count = r3;
+    Register index = r9;
+    Register ch = r10;
+    Register tmp = rscratch1;
+    Register vec_len = r14;
+
+    Register result_bits = r11;
+    Register page_index = r4;
+    Register map = r5;
+    Register map_entry = r6;
+    Register page = r7;
+
+    const uint8_t* const case_page_index = to_lower
+        ? string_case_lower_page_index : string_case_upper_page_index;
+    const uint16_t* const case_map = to_lower
+        ? string_case_lower_map[0] : string_case_upper_map[0];
+    Label SCALAR_LOOP, SCALAR_BODY, STORE, NEXT, DONE, FALLBACK;
+
+    __ movw(first, first);
+    __ movw(count, count);
+    __ mov(index, zr);
+    if (!is_latin1) {
+      __ mov(result_bits, zr);
+    }
+
+#ifdef ASSERT
+    if (StringCaseIntrinsicMinLength > 0) {
+      Label min_length_ok;
+      __ mov(tmp, (uint64_t)StringCaseIntrinsicMinLength);
+      __ cmp(count, tmp);
+      __ br(Assembler::HS, min_length_ok);
+      __ stop("String case intrinsic called below minimum length");
+      __ bind(min_length_ok);
+    }
+#endif
+
+    assert(backend == StringCaseBackend::sve || backend == StringCaseBackend::sve2,
+           "unexpected string case backend");
+    if (is_latin1) {
+      if (to_lower) {
+        emit_string_case_latin1_lower(backend, DONE);
+      } else {
+        emit_string_case_latin1_upper(backend, SCALAR_LOOP, DONE);
+      }
+    } else {
+      emit_string_case_utf16_sve(case_page_index, case_map, SCALAR_LOOP, DONE);
+    }
+
+    __ bind(SCALAR_LOOP);
+      if (!is_latin1) {
+        __ mov(page_index, reinterpret_cast<uint64_t>(case_page_index));
+        __ mov(map, reinterpret_cast<uint64_t>(case_map));
+        __ movw(vec_len, string_case_fallback_sentinel);
+      }
+
+    __ bind(SCALAR_BODY);
+      __ cmp(index, count);
+      __ br(Assembler::GE, DONE);
+
+      if (is_latin1) {
+        __ ldrb(ch, Address(src, index));
+      } else {
+        __ ldrh(ch, Address(src, index, Address::lsl(1)));
+      }
+      if (is_latin1) {
+        Label CHECK_EXTENDED, APPLY_CASE;
+        if (!to_lower) {
+          __ cmp(ch, u1(0xb5));
+          __ br(Assembler::EQ, FALLBACK);
+          __ cmp(ch, u1(0xdf));
+          __ br(Assembler::EQ, FALLBACK);
+          __ cmp(ch, u1(0xff));
+          __ br(Assembler::EQ, FALLBACK);
+        }
+
+        if (to_lower) {
+          __ orrw(tmp, ch, 0x20);
+        } else {
+          __ andw(tmp, ch, ~0x20u);
+        }
+        __ cmp(tmp, u1(to_lower ? 'a' : 'A'));
+        __ br(Assembler::LO, CHECK_EXTENDED);
+        __ cmp(tmp, u1(to_lower ? 'z' : 'Z'));
+        __ br(Assembler::LS, APPLY_CASE);
+
+        __ bind(CHECK_EXTENDED);
+        __ cmp(tmp, u1(to_lower ? 0xe0 : 0xc0));
+        __ br(Assembler::LO, STORE);
+        __ cmp(tmp, u1(to_lower ? 0xfe : 0xde));
+        __ br(Assembler::HI, STORE);
+        __ cmp(tmp, u1(to_lower ? 0xf7 : 0xd7));
+        __ br(Assembler::EQ, STORE);
+
+        __ bind(APPLY_CASE);
+        __ movw(ch, tmp);
+      } else {
+        Label KEEP_ORIGINAL;
+        __ lsrw(page, ch, string_case_page_shift);
+        __ ldrb(page, Address(page_index, page, Address::lsl(0)));
+        __ andw(tmp, ch, string_case_page_mask);
+        __ addw(tmp, tmp, page, Assembler::LSL, string_case_page_shift);
+        __ ldrh(map_entry, Address(map, tmp, Address::lsl(1)));
+        __ cmpw(map_entry, vec_len);
+        __ br(Assembler::EQ, FALLBACK);
+        __ cbzw(map_entry, KEEP_ORIGINAL);
+        __ movw(ch, map_entry);
+        __ bind(KEEP_ORIGINAL);
+        __ orrw(result_bits, result_bits, ch);
+      }
+
+    __ bind(STORE);
+      if (is_latin1) {
+        __ strb(ch, Address(dst, index));
+      } else {
+        __ strh(ch, Address(dst, index, Address::lsl(1)));
+      }
+
+    __ bind(NEXT);
+      __ add(index, index, 1);
+      if (is_latin1) {
+        __ b(SCALAR_LOOP);
+      } else {
+        __ b(SCALAR_BODY);
+      }
+
+    __ bind(FALLBACK);
+      __ add(tmp, first, index);
+      if (is_latin1) {
+        __ mov(r0, tmp);
+      } else {
+        __ add(tmp, tmp, 1);
+        __ neg(r0, tmp);
+      }
+      __ ret(lr);
+
+    __ bind(DONE);
+      if (is_latin1) {
+        __ add(r0, first, count);
+      } else {
+        __ movw(r0, result_bits);
+      }
+      __ ret(lr);
+
+    return entry;
+  }
+
+  void generate_string_case_stubs() {
+    const StringCaseBackend backend =
+        static_cast<StringCaseBackend>(StringCaseIntrinsicBackend);
+    if (backend == StringCaseBackend::off) {
+      return;
+    }
+
+    assert(backend == StringCaseBackend::sve || backend == StringCaseBackend::sve2,
+           "string case backend must be resolved before stub generation");
+    if (backend == StringCaseBackend::sve2) {
+      assert(UseSVE >= 2 && VM_Version::supports_svebitperm(),
+             "SVE2 string case backend requires SVE BitPerm");
+    }
+
+    StubRoutines::_string_case_intrinsic_min_length =
+        StringCaseIntrinsicMinLength;
+    StubRoutines::_string_case_latin1_lower =
+        generate_string_case_convert(
+            true, true, backend, "string_case_latin1_lower");
+    StubRoutines::_string_case_latin1_upper =
+        generate_string_case_convert(
+            true, false, backend, "string_case_latin1_upper");
+    StubRoutines::_string_case_utf16_lower =
+        generate_string_case_convert(
+            false, true, backend, "string_case_utf16_lower");
+    StubRoutines::_string_case_utf16_upper =
+        generate_string_case_convert(
+            false, false, backend, "string_case_utf16_upper");
   }
 
   void inflate_and_store_2_fp_registers(bool generatePrfm,
@@ -9230,10 +11234,218 @@ class StubGenerator: public StubCodeGenerator {
     // }
   };
 
+#undef __
+#define __ _masm->
+
+#ifdef LINUX
+  static void free_kml_library_paths(char** paths, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+      FREE_C_HEAP_ARRAY(char, paths[i]);
+    }
+    FREE_C_HEAP_ARRAY(char*, paths);
+  }
+
+  static bool find_kml_library_path(const char* search_path,
+                                    const char* library_name,
+                                    char* library_path,
+                                    size_t library_path_size) {
+    const char* const file_separator = os::file_separator();
+    const size_t file_name_length =
+        strlen(library_name) + strlen(file_separator) + 1;
+    size_t path_count = 0;
+    char** const paths =
+        os::split_path(search_path, &path_count, file_name_length);
+    if (paths == nullptr || path_count == 0) {
+      vm_exit_during_initialization("-XX:KMLLibraryPath must not be empty");
+    }
+
+    for (size_t i = 0; i < path_count; i++) {
+      if (paths[i][0] == '\0') {
+        vm_exit_during_initialization(
+            "-XX:KMLLibraryPath must not contain empty path elements",
+            search_path);
+      }
+      if (paths[i][0] != *file_separator) {
+        vm_exit_during_initialization(
+            "-XX:KMLLibraryPath entries must be absolute directories",
+            paths[i]);
+      }
+    }
+
+    bool found = false;
+    for (size_t i = 0; i < path_count; i++) {
+      const size_t path_length = strlen(paths[i]);
+      const char* const separator =
+          paths[i][path_length - 1] == *file_separator ? "" : file_separator;
+      const int written = os::snprintf(library_path, library_path_size,
+                                       "%s%s%s", paths[i], separator,
+                                       library_name);
+      if (written < 0 ||
+          static_cast<size_t>(written) >= library_path_size) {
+        vm_exit_during_initialization(
+            "-XX:KMLLibraryPath entry exceeds the maximum path length",
+            paths[i]);
+      }
+
+      if (os::file_exists(library_path)) {
+        found = true;
+        break;
+      }
+    }
+
+    free_kml_library_paths(paths, path_count);
+    return found;
+  }
+
+  static address load_kml_pow() {
+    static const char kml_library_name[] = "libkm.so";
+    if (!FLAG_IS_DEFAULT(KMLLibraryPath) &&
+        (KMLLibraryPath == nullptr || KMLLibraryPath[0] == '\0')) {
+      vm_exit_during_initialization("-XX:KMLLibraryPath must not be empty");
+    }
+
+    char library_path[JVM_MAXPATHLEN];
+    const char* library_to_load = kml_library_name;
+    if (KMLLibraryPath != nullptr) {
+      if (!find_kml_library_path(KMLLibraryPath, kml_library_name,
+                                 library_path, sizeof(library_path))) {
+        vm_exit_during_initialization(
+            "Unable to find libkm.so in -XX:KMLLibraryPath",
+            KMLLibraryPath);
+      }
+      library_to_load = library_path;
+    }
+
+    char ebuf[1024];
+    void* const library_handle =
+        os::dll_load(library_to_load, ebuf, sizeof(ebuf));
+    if (library_handle == nullptr) {
+      vm_exit_during_initialization("Unable to load KML library", ebuf);
+    }
+
+    // The generated adapter embeds pow_entry, so deliberately leave the
+    // library loaded for the lifetime of the VM.
+    const address pow_entry =
+        reinterpret_cast<address>(os::dll_lookup(library_handle, "pow"));
+    if (pow_entry == nullptr) {
+      vm_exit_during_initialization(
+          "Unable to find symbol 'pow' in KML library", library_to_load);
+    }
+
+    log_info(library)("Loaded KML library %s, handle " INTPTR_FORMAT
+                      ", pow entry " INTPTR_FORMAT,
+                      library_to_load, p2i(library_handle), p2i(pow_entry));
+    return pow_entry;
+  }
+
+  address generate_kml_pow_adapter(address kml_pow_entry) {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", "kml_pow");
+    address start = __ pc();
+
+    const FloatRegister x = v0;
+    const FloatRegister y = v1;
+    const Register target = r16;
+
+    static constexpr int DOUBLE_FRACTION_BITS = 52;
+    static constexpr int DOUBLE_EXPONENT_BITS = 11;
+    static constexpr int DOUBLE_SIGN_BIT = BitsPerLong - 1;
+    static constexpr int HUGE_Y_EXPONENT_FIELD = 0x41e; // Biased exponent of 2^31.
+    static constexpr int HALF_EXPONENT_FIELD = 0x3fe;
+    static constexpr int ONE_EXPONENT_FIELD = 0x3ff;
+    static constexpr int TWO_EXPONENT_FIELD = 0x400;
+
+    Label use_kml;
+    Label zero_fraction;
+    Label pow_abs_one;
+    Label pow_minus_one;
+    Label pow_two;
+    Label pow_half;
+    Label return_one;
+    Label use_fdlibm;
+
+    // Preserve fdlibm's high-accuracy path for huge exponents. In particular,
+    // KML loses precision when x is very close to one and |y| is large. This
+    // also sends non-finite exponents to fdlibm, whose semantics differ from
+    // KML pow for a few inputs.
+    __ fmovd(rscratch2, y);
+    __ ubfx(rscratch1, rscratch2,
+            DOUBLE_FRACTION_BITS, DOUBLE_EXPONENT_BITS);
+    __ cmpw(rscratch1, HUGE_Y_EXPONENT_FIELD);
+    __ br(Assembler::HS, use_fdlibm);
+
+    // A finite y with zero fraction bits is signed zero or an exact signed
+    // normal power of two. Dispatch those uncommon values separately, keeping
+    // the ordinary KML path short.
+    __ lsl(rscratch1, rscratch2, BitsPerLong - DOUBLE_FRACTION_BITS);
+    __ cbz(rscratch1, zero_fraction);
+
+    __ bind(use_kml);
+    // Use IP0 as the indirect branch target so a BTI c landing pad is accepted.
+    __ mov(target, kml_pow_entry);
+    __ br(target);
+
+    __ bind(zero_fraction);
+    __ ubfx(rscratch1, rscratch2,
+            DOUBLE_FRACTION_BITS, DOUBLE_EXPONENT_BITS);
+    __ cbzw(rscratch1, return_one); // y is +0.0 or -0.0.
+
+    __ cmpw(rscratch1, ONE_EXPONENT_FIELD);
+    __ br(Assembler::EQ, pow_abs_one);
+
+    // The remaining fast paths apply only to positive exponents. Negative
+    // powers of two continue to use KML's general implementation.
+    __ tbnz(rscratch2, DOUBLE_SIGN_BIT, use_kml);
+    __ cmpw(rscratch1, TWO_EXPONENT_FIELD);
+    __ br(Assembler::EQ, pow_two);
+    __ cmpw(rscratch1, HALF_EXPONENT_FIELD);
+    __ br(Assembler::EQ, pow_half);
+    __ b(use_kml);
+
+    __ bind(pow_abs_one);
+    __ tbnz(rscratch2, DOUBLE_SIGN_BIT, pow_minus_one);
+    // Multiplication by one preserves all finite values and signed zeros, and
+    // also quiets a signaling NaN as fdlibm's initial NaN check does.
+    __ fmuld(x, x, y);                // y == 1.0.
+    __ ret(lr);
+
+    __ bind(pow_minus_one);
+    __ fmovd(y, 1.0);
+    __ fdivd(x, y, x);                // y == -1.0.
+    __ ret(lr);
+
+    __ bind(pow_two);
+    __ fmuld(x, x, x);
+    __ ret(lr);
+
+    __ bind(pow_half);
+    // pow(-0.0, 0.5) is +0.0 and pow(-Inf, 0.5) is +Inf, while
+    // sqrt returns -0.0 and NaN respectively. Keep all negative-sign x
+    // values on the fdlibm path.
+    __ fmovd(rscratch1, x);
+    __ tbnz(rscratch1, DOUBLE_SIGN_BIT, use_fdlibm);
+    __ fsqrtd(x, x);
+    __ ret(lr);
+
+    __ bind(return_one);
+    __ fmovd(x, 1.0);
+    __ ret(lr);
+
+    __ bind(use_fdlibm);
+    __ mov(target, CAST_FROM_FN_PTR(address, SharedRuntime::dpow));
+    __ br(target);
+
+    return start;
+  }
+#endif // LINUX
 
   // Initialization
   void generate_initial_stubs() {
     // Generate initial stubs and initializes the entry points
+
+    if (PrintAArch64OptimizationHits) {
+      optimization_hit_reporter = generate_optimization_hit_reporter();
+    }
 
     // entry points that exist in all platforms Note: This is code
     // that could be shared among different platforms - however the
@@ -9278,6 +11490,25 @@ class StubGenerator: public StubCodeGenerator {
     // if (vmIntrinsics::is_intrinsic_available(vmIntrinsics::_dlog)) {
     //   StubRoutines::_dlog = generate_dlog();
     // }
+    if (UseKMLPow) {
+#ifdef LINUX
+      const address kml_pow_entry = load_kml_pow();
+      StubRoutines::_dpow = generate_kml_pow_adapter(kml_pow_entry);
+#else
+      vm_exit_during_initialization(
+          "-XX:+UseKMLPow is only supported on Linux");
+#endif // LINUX
+    } else if (!FLAG_IS_DEFAULT(KMLLibraryPath)) {
+#ifdef LINUX
+      log_info(library)(
+          "-XX:KMLLibraryPath is ignored because "
+          "-XX:+UseKMLPow is not enabled");
+#else
+      log_info(library)(
+          "-XX:KMLLibraryPath is ignored because KML pow is only "
+          "supported on Linux");
+#endif // LINUX
+    }
 
     if (vmIntrinsics::is_intrinsic_available(vmIntrinsics::_dsin)) {
       StubRoutines::_dsin = generate_dsin_dcos(/* isCos = */ false);
@@ -9343,6 +11574,10 @@ class StubGenerator: public StubCodeGenerator {
       StubRoutines::_poly1305_processBlocks = generate_poly1305_processBlocks();
     }
 
+    if (UseVectorizedMismatchIntrinsic) {
+      StubRoutines::_vectorizedMismatch = generate_vectorizedMismatch();
+    }
+
 #if defined (LINUX) && !defined (__ARM_FEATURE_ATOMICS)
 
     generate_atomic_entry_points();
@@ -9380,6 +11615,12 @@ class StubGenerator: public StubCodeGenerator {
     StubRoutines::aarch64::_large_arrays_hashcode_char = generate_large_arrays_hashcode(T_CHAR);
     StubRoutines::aarch64::_large_arrays_hashcode_int = generate_large_arrays_hashcode(T_INT);
     StubRoutines::aarch64::_large_arrays_hashcode_short = generate_large_arrays_hashcode(T_SHORT);
+    if (UseSVEHashCodeIntrinsic) {
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_boolean = generate_large_arrays_hashcode_sve2(T_BOOLEAN);
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_byte = generate_large_arrays_hashcode_sve2(T_BYTE);
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_char = generate_large_arrays_hashcode_sve2(T_CHAR);
+      StubRoutines::aarch64::_large_arrays_hashcode_sve2_short = generate_large_arrays_hashcode_sve2(T_SHORT);
+    }
 
     // byte_array_inflate stub for large arrays.
     StubRoutines::aarch64::_large_byte_array_inflate = generate_large_byte_array_inflate();
@@ -9391,9 +11632,22 @@ class StubGenerator: public StubCodeGenerator {
 
     StubRoutines::aarch64::_scalar_convert_utf8_to_utf16 = generate_scalar_convert_utf8_to_utf16();
 
+    if (UseStringEqualsIgnoreCaseIntrinsic) {
+      StubRoutines::_string_equals_ignore_case_min_length =
+          StringEqualsIgnoreCaseIntrinsicMinLength;
+      StubRoutines::_string_equals_ignore_case_ll =
+          generate_string_equals_ignore_case(LL);
+      StubRoutines::_string_equals_ignore_case_lu =
+          generate_string_equals_ignore_case(LU);
+      StubRoutines::_string_equals_ignore_case_uu =
+          generate_string_equals_ignore_case(UU);
+    }
+
     generate_compare_long_strings();
 
     generate_string_indexof_stubs();
+
+    generate_string_case_stubs();
 
 #ifdef COMPILER2
     if (UseMultiplyToLenIntrinsic) {

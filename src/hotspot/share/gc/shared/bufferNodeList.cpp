@@ -26,6 +26,7 @@
 #include "gc/shared/bufferNodeList.hpp"
 #include "utilities/debug.hpp"
 
+#ifndef AARCH64
 BufferNodeList::BufferNodeList() :
   _head(nullptr), _tail(nullptr), _entry_count(0) {}
 
@@ -37,3 +38,5 @@ BufferNodeList::BufferNodeList(BufferNode* head,
   assert((_head == nullptr) == (_tail == nullptr), "invariant");
   assert((_head == nullptr) == (_entry_count == 0), "invariant");
 }
+
+#endif // !AARCH64

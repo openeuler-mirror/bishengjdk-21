@@ -1317,6 +1317,41 @@ const TypeFunc* OptoRuntime::base64_decodeBlock_Type() {
   return TypeFunc::make(domain, range);
 }
 
+const TypeFunc* OptoRuntime::stringCaseConvert_Type() {
+  int argcnt = 4;
+
+  const Type** fields = TypeTuple::fields(argcnt);
+  int argp = TypeFunc::Parms;
+  fields[argp++] = TypeRawPtr::BOTTOM; // source byte address
+  fields[argp++] = TypeRawPtr::BOTTOM; // destination byte address
+  fields[argp++] = TypeInt::INT;       // first character index
+  fields[argp++] = TypeInt::INT;       // character count from first
+  assert(argp == TypeFunc::Parms + argcnt, "correct decoding");
+  const TypeTuple* domain = TypeTuple::make(TypeFunc::Parms + argcnt, fields);
+
+  fields = TypeTuple::fields(1);
+  fields[TypeFunc::Parms + 0] = TypeInt::INT;
+  const TypeTuple* range = TypeTuple::make(TypeFunc::Parms + 1, fields);
+  return TypeFunc::make(domain, range);
+}
+
+const TypeFunc* OptoRuntime::string_equals_ignore_case_Type() {
+  int argcnt = 3;
+
+  const Type** fields = TypeTuple::fields(argcnt);
+  int argp = TypeFunc::Parms;
+  fields[argp++] = TypePtr::NOTNULL; // first string address
+  fields[argp++] = TypePtr::NOTNULL; // second string address
+  fields[argp++] = TypeInt::INT;     // length in UTF-16 code units
+  assert(argp == TypeFunc::Parms + argcnt, "correct decoding");
+  const TypeTuple* domain = TypeTuple::make(TypeFunc::Parms + argcnt, fields);
+
+  fields = TypeTuple::fields(1);
+  fields[TypeFunc::Parms + 0] = TypeInt::INT;
+  const TypeTuple* range = TypeTuple::make(TypeFunc::Parms + 1, fields);
+  return TypeFunc::make(domain, range);
+}
+
 // Poly1305 processMultipleBlocks function
 const TypeFunc* OptoRuntime::poly1305_processBlocks_Type() {
   int argcnt = 4;

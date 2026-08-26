@@ -82,7 +82,7 @@
   declare_constant(HeapRegionType::ContinuesHumongousTag)                     \
   declare_constant(HeapRegionType::OldMask)                                   \
   declare_constant(BarrierSet::G1BarrierSet)                                  \
-  declare_constant(G1CardTable::g1_young_gen)
+  NOT_AARCH64(declare_constant(G1CardTable::g1_young_gen))
 
 #define VM_TYPES_G1GC(declare_type,                                           \
                       declare_toplevel_type,                                  \
@@ -99,7 +99,7 @@
   declare_toplevel_type(PtrQueue)                                             \
   declare_toplevel_type(HeapRegionType)                                       \
   declare_toplevel_type(SATBMarkQueue)                                        \
-  declare_toplevel_type(G1DirtyCardQueue)                                     \
+  NOT_AARCH64(declare_toplevel_type(G1DirtyCardQueue))                  \
                                                                               \
   declare_toplevel_type(G1CollectedHeap*)                                     \
   declare_toplevel_type(HeapRegion*)                                          \

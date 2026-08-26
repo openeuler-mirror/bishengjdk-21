@@ -35,6 +35,12 @@
 #include "gc/shared/slidingForwarding.inline.hpp"
 
 void G1DetermineCompactionQueueClosure::free_empty_humongous_region(HeapRegion* hr) {
+#ifdef AARCH64
+  if (VerifyDuringGC) {
+    // Satisfy some asserts in free_..._region.
+    hr->clear_both_card_tables();
+  }
+#endif /* AARCH64 */
   _g1h->free_humongous_region(hr, nullptr);
   _collector->set_free(hr->hrm_index());
   add_to_compaction_queue(hr);

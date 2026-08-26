@@ -3616,6 +3616,10 @@ public:
     f(op1, 31, 25), f(type, 24, 23), f(op2, 22, 21), rf(Zm, 16);                \
     f(op3, 15, 13), pgrf(Pg, 10), srf(Xn, 5), rf(Zt, 0);                        \
   }
+  // SVE gather load bytes into 32-bit elements (scalar plus 32-bit offsets)
+  INSN(sve_ld1b_gather,  0b1000010, 0b00, 0b00, 0b010);
+  // SVE gather load halfwords into 32-bit elements (scalar plus 32-bit scaled offsets)
+  INSN(sve_ld1h_gather,  0b1000010, 0b01, 0b01, 0b010);
   // SVE 32-bit gather load words (scalar plus 32-bit scaled offsets)
   INSN(sve_ld1w_gather,  0b1000010, 0b10, 0b01, 0b010);
   // SVE 64-bit gather load (scalar plus 32-bit unpacked scaled offsets)
@@ -4196,6 +4200,20 @@ public:
     pgrf(Pg, 10), rf(Zn, 5), rf(Zd, 0);
   }
 
+  // SVE2 cross-lane character match detect
+#define INSN(NAME, op)                                                                \
+  void NAME(PRegister Pd, SIMD_RegVariant T, PRegister Pg,                            \
+            FloatRegister Zn, FloatRegister Zm) {                                     \
+    starti;                                                                           \
+    assert(T == B || T == H, "invalid size");                                         \
+    f(0b01000101, 31, 24), f(T, 23, 22), f(0b1, 21), rf(Zm, 16);                      \
+    f(0b100, 15, 13), pgrf(Pg, 10), rf(Zn, 5), f(op, 4), prf(Pd, 0);                  \
+  }
+
+  INSN(sve_match,  0b0);
+  INSN(sve_nmatch, 0b1);
+#undef INSN
+
   // SVE2 Count matching elements in vector
   void sve_histcnt(FloatRegister Zd, SIMD_RegVariant T, PRegister Pg,
                    FloatRegister Zn, FloatRegister Zm) {
@@ -4228,6 +4246,70 @@ public:
   }
 
   INSN(sve_eor3, 0b001); // Bitwise exclusive OR of three vectors
+#undef INSN
+
+// SVE2 saturating operations - predicate
+#define INSN(NAME, op1, op2)                                                          \
+  void NAME(FloatRegister Zdn, SIMD_RegVariant T, PRegister Pg, FloatRegister Znm) {  \
+    assert(T != Q, "invalid register variant");                                       \
+    sve_predicate_reg_insn(op1, op2, Zdn, T, Pg, Znm);                                \
+  }
+
+  INSN(sve_sqadd, 0b01000100, 0b011000100); // signed saturating add
+  INSN(sve_sqsub, 0b01000100, 0b011010100); // signed saturating sub
+  INSN(sve_uqadd, 0b01000100, 0b011001100); // unsigned saturating add
+  INSN(sve_uqsub, 0b01000100, 0b011011100); // unsigned saturating sub
+
+#undef INSN
+
+  // SVE2 widening multiply (long), vectors. Only expose the forms used by the
+  // SVE2 hashcode stub; add other encodings together with their first user.
+  // UMULLB Zd.<T>, Zn.<Tb>, Zm.<Tb>  -- result lanes T (H/S/D), source lanes Tb half size
+  // SMULLB Zd.<T>, Zn.<Tb>, Zm.<Tb>
+  // Encoding (ARM ARM, SVE2 widening integer multiply):
+  //   31..24: 01000101
+  //   23..22: size       (01=H result, 10=S result, 11=D result)
+  //   21:     0
+  //   20..16: Zm
+  //   15..11: 0111U      (U=0 signed, U=1 unsigned)
+  //   10:     T          (0=bottom, 1=top)
+  //   9..5:   Zn
+  //   4..0:   Zd
+#define INSN(NAME, is_unsigned, top)                                                    \
+  void NAME(FloatRegister Zd, SIMD_RegVariant T, FloatRegister Zn, FloatRegister Zm) {  \
+    starti;                                                                              \
+    assert(T == H || T == S || T == D, "invalid size for SVE2 widening multiply");       \
+    f(0b01000101, 31, 24), f(T, 23, 22), f(0b0, 21), rf(Zm, 16);                         \
+    f(is_unsigned ? 0b01111 : 0b01110, 15, 11), f(top, 10), rf(Zn, 5), rf(Zd, 0);        \
+  }
+
+  INSN(sve_smullb, false, 0b0);
+  INSN(sve_umullb, true,  0b0);
+#undef INSN
+
+  // SVE2 widening multiply-accumulate (long), vectors.
+  // UMLALT Zda.<T>, Zn.<Tb>, Zm.<Tb> -- Zda += Zn[top_pair] * Zm[top_pair]
+  // SMLALT Zda.<T>, Zn.<Tb>, Zm.<Tb>
+  // Encoding (ARM ARM, SVE2 integer multiply-add long):
+  //   31..24: 01000100
+  //   23..22: size       (01=H result, 10=S result, 11=D result)
+  //   21:     0
+  //   20..16: Zm
+  //   15..12: 0100
+  //   11:     U          (0=signed, 1=unsigned)
+  //   10:     T          (0=bottom, 1=top)
+  //   9..5:   Zn
+  //   4..0:   Zda
+#define INSN(NAME, is_unsigned, top)                                                     \
+  void NAME(FloatRegister Zda, SIMD_RegVariant T, FloatRegister Zn, FloatRegister Zm) {  \
+    starti;                                                                              \
+    assert(T == H || T == S || T == D, "invalid size for SVE2 widening multiply-add");   \
+    f(0b01000100, 31, 24), f(T, 23, 22), f(0b0, 21), rf(Zm, 16);                         \
+    f(is_unsigned ? 0b01001 : 0b01000, 15, 11), f(top, 10), rf(Zn, 5), rf(Zda, 0);        \
+  }
+
+  INSN(sve_smlalt, false, 0b1);
+  INSN(sve_umlalt, true,  0b1);
 #undef INSN
 
   Assembler(CodeBuffer* code) : AbstractAssembler(code) {

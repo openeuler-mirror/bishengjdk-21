@@ -145,6 +145,11 @@ public:
 #endif
   }
 
+#ifdef AARCH64
+  // Return the barrier data of n, if available, or 0 otherwise.
+  static uint8_t barrier_data(const Node* n);
+
+#endif /* AARCH64 */
   uint8_t barrier_data() { return _barrier_data; }
   void set_barrier_data(uint8_t barrier_data) { _barrier_data = barrier_data; }
 
@@ -1155,10 +1160,13 @@ class MemBarNode: public MultiNode {
     TrailingLoadStore,
     LeadingLoadStore,
     TrailingPartialArrayCopy
-#ifdef AARCH64
-    , StandaloneRelease
-#endif // AARCH64
   } _kind;
+
+#ifdef AARCH64
+  // True for a leading MemBarRelease that immediately precedes a standalone
+  // release store (setRelease / putXRelease / putOrdered*).
+  bool _leading_release_store;
+#endif // AARCH64
 
 #ifdef ASSERT
   uint _pair_idx;
@@ -1194,12 +1202,12 @@ public:
   bool trailing() const { return _kind == TrailingLoad || _kind == TrailingStore || _kind == TrailingLoadStore; }
   bool leading() const { return _kind == LeadingStore || _kind == LeadingLoadStore; }
   bool standalone() const { return _kind == Standalone; }
-#ifdef AARCH64
-  void set_standalone_release() { _kind = StandaloneRelease; }
-  bool standalone_release() const { return _kind == StandaloneRelease; }
-#endif // AARCH64
   void set_trailing_partial_array_copy() { _kind = TrailingPartialArrayCopy; }
   bool trailing_partial_array_copy() const { return _kind == TrailingPartialArrayCopy; }
+#ifdef AARCH64
+  void set_leading_release_store() { _leading_release_store = true; }
+  bool leading_release_store() const { return _leading_release_store; }
+#endif // AARCH64
 
   static void set_store_pair(MemBarNode* leading, MemBarNode* trailing);
   static void set_load_store_pair(MemBarNode* leading, MemBarNode* trailing);

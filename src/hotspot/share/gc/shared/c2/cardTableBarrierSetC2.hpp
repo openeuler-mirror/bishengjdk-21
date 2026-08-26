@@ -42,12 +42,18 @@ protected:
   Node* byte_map_base_node(GraphKit* kit) const;
 
 public:
+#ifndef AARCH64
   virtual void clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const;
   virtual bool is_gc_barrier_node(Node* node) const;
+#endif /* ! AARCH64 */
   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, bool is_clone_instance, ArrayCopyPhase phase) const;
 
+#ifndef AARCH64
   bool use_ReduceInitialCardMarks() const;
+#else /* AARCH64 */
+  static bool use_ReduceInitialCardMarks();
+#endif /* AARCH64 */
 };
 
 #endif // SHARE_GC_SHARED_C2_CARDTABLEBARRIERSETC2_HPP

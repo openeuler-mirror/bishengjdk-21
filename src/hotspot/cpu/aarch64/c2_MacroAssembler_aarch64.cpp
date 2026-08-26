@@ -59,7 +59,7 @@ address C2_MacroAssembler::arrays_hashcode(Register ary, Register cnt, Register 
 
   Register tmp1 = rscratch1, tmp2 = rscratch2;
 
-  Label TAIL, STUB_SWITCH, STUB_SWITCH_OUT, LOOP, BR_BASE, LARGE, DONE;
+  Label TAIL, STUB_SWITCH, STUB_SWITCH_OUT, LOOP, BR_BASE, LARGE, SVE2_LARGE, DONE;
 
   // Vectorization factor. Number of array elements loaded to one SIMD&FP registers by the stubs. We
   // use 8H load arrangements for chars and shorts and 8B for booleans and bytes. It's possible to
@@ -93,10 +93,49 @@ address C2_MacroAssembler::arrays_hashcode(Register ary, Register cnt, Register 
     ShouldNotReachHere();
   }
 
-  // large_arrays_hashcode(T_INT) performs worse than the scalar loop below when the Neon loop
-  // implemented by the stub executes just once. Call the stub only if at least two iterations will
-  // be executed.
+  // For ints, the base stub only wins once we can execute at least two full vector iterations.
   const size_t large_threshold = eltype == T_INT ? vf * 2 : vf;
+  size_t sve2_threshold = large_threshold;
+  const bool use_sve_hashcode =
+      UseSVEHashCodeIntrinsic &&
+      (eltype == T_BOOLEAN || eltype == T_BYTE ||
+       eltype == T_CHAR || eltype == T_SHORT);
+  if (use_sve_hashcode) {
+    // Keep T_INT on the base NEON stub. There is no SVE2 widening fold to
+    // exploit for 32-bit elements, and the SVE int path was slower than NEON.
+    assert(eltype != T_INT, "T_INT must stay on the base hashcode stub");
+
+    // The SVE2 stubs only vectorize full raw SVE chunks and finish the
+    // remainder with a scalar tail. Use the base NEON stub below the SVE2
+    // threshold when the input is still large enough for the base stub. The
+    // element-count floor lets byte-sized and halfword-sized inputs keep
+    // separate startup-cost heuristics instead of deriving both thresholds
+    // only from the VL.
+    const size_t sve_chunk_elems =
+        VM_Version::get_initial_sve_vector_length() / type2aelembytes(eltype);
+    size_t min_elements = 0;
+    switch (eltype) {
+    case T_BOOLEAN:
+      min_elements = SVEHashCodeLatin1MinElements;
+      break;
+    case T_BYTE:
+      min_elements = SVEHashCodeByteMinElements;
+      break;
+    case T_CHAR:
+      min_elements = SVEHashCodeUTF16MinElements;
+      break;
+    case T_SHORT:
+      min_elements = SVEHashCodeShortMinElements;
+      break;
+    default:
+      ShouldNotReachHere();
+    }
+    sve2_threshold = MAX2(sve_chunk_elems * SVEHashCodeStubMinVectorChunks,
+                          min_elements);
+    cmpw(cnt, sve2_threshold);
+    br(Assembler::HS, SVE2_LARGE);
+  }
+
   cmpw(cnt, large_threshold);
   br(Assembler::HS, LARGE);
 
@@ -135,9 +174,24 @@ address C2_MacroAssembler::arrays_hashcode(Register ary, Register cnt, Register 
   assert(stub.target() != nullptr, "array_hashcode stub has not been generated");
   address tpc = trampoline_call(stub);
   if (tpc == nullptr) {
-    DEBUG_ONLY(reset_labels(TAIL, BR_BASE));
+    DEBUG_ONLY(TAIL.reset(); BR_BASE.reset(); SVE2_LARGE.reset(); DONE.reset());
     postcond(pc() == badAddress);
     return nullptr;
+  }
+  b(DONE);
+
+  if (use_sve_hashcode) {
+    bind(SVE2_LARGE);
+
+    RuntimeAddress sve_stub =
+        RuntimeAddress(StubRoutines::aarch64::large_arrays_hashcode_sve(eltype));
+    assert(sve_stub.target() != nullptr, "SVE2 array_hashcode stub has not been generated");
+    address sve_tpc = trampoline_call(sve_stub);
+    if (sve_tpc == nullptr) {
+      DEBUG_ONLY(TAIL.reset(); BR_BASE.reset(); DONE.reset());
+      postcond(pc() == badAddress);
+      return nullptr;
+    }
   }
 
   bind(DONE);
@@ -1973,6 +2027,32 @@ void C2_MacroAssembler::neon_reduce_mul_integral(Register dst, BasicType bt,
         ShouldNotReachHere();
     }
   BLOCK_COMMENT("} neon_reduce_mul_integral");
+}
+
+// Vector reduction multiply for integral type with SVE instructions.
+// Clobbers: rscratch1
+void C2_MacroAssembler::sve_reduce_mul_integral(Register dst, BasicType bt,
+                                                Register isrc, FloatRegister vsrc,
+                                                unsigned vector_length_in_bytes,
+                                                FloatRegister vtmp1, FloatRegister vtmp2) {
+  assert(bt == T_INT || bt == T_LONG, "unsupported element type");
+  assert(vector_length_in_bytes > 16 && vector_length_in_bytes % type2aelembytes(bt) == 0,
+         "unsupported vector length");
+  uint length = vector_length_in_bytes / type2aelembytes(bt);
+  assert((length & (length - 1)) == 0, "vector length must be power of 2");
+  assert_different_registers(isrc, dst);
+
+  BLOCK_COMMENT("sve_reduce_mul_integral {");
+    Assembler::SIMD_RegVariant size = elemType_to_regVariant(bt);
+    sve_orr(vtmp1, vsrc, vsrc);
+    for (uint step = length >> 1; step > 0; step >>= 1) {
+      sve_orr(vtmp2, vtmp1, vtmp1);
+      sve_ext(vtmp2, vtmp2, step * type2aelembytes(bt));
+      sve_mul(vtmp1, size, ptrue, vtmp2);
+    }
+    umov(rscratch1, vtmp1, size, 0);
+    mul(dst, isrc, rscratch1);
+  BLOCK_COMMENT("} sve_reduce_mul_integral");
 }
 
 // Vector reduction multiply for floating-point type with ASIMD instructions.

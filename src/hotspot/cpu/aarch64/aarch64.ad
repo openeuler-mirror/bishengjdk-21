@@ -809,6 +809,59 @@ reg_class vectora_reg (
     V31, V31_H, V31_J, V31_K,
 );
 
+// Full-width SVE register classes for fixed stub scratch registers.
+reg_class v0a_reg(
+    V0, V0_H, V0_J, V0_K
+);
+
+reg_class v1a_reg(
+    V1, V1_H, V1_J, V1_K
+);
+
+reg_class v2a_reg(
+    V2, V2_H, V2_J, V2_K
+);
+
+reg_class v3a_reg(
+    V3, V3_H, V3_J, V3_K
+);
+
+reg_class v4a_reg(
+    V4, V4_H, V4_J, V4_K
+);
+
+reg_class v5a_reg(
+    V5, V5_H, V5_J, V5_K
+);
+
+reg_class v6a_reg(
+    V6, V6_H, V6_J, V6_K
+);
+
+reg_class v7a_reg(
+    V7, V7_H, V7_J, V7_K
+);
+
+reg_class v10a_reg(
+    V10, V10_H, V10_J, V10_K
+);
+
+reg_class v11a_reg(
+    V11, V11_H, V11_J, V11_K
+);
+
+reg_class v12a_reg(
+    V12, V12_H, V12_J, V12_K
+);
+
+reg_class v13a_reg(
+    V13, V13_H, V13_J, V13_K
+);
+
+reg_class v14a_reg(
+    V14, V14_H, V14_J, V14_K
+);
+
 // Class for all 64bit vector registers
 reg_class vectord_reg(
     V0, V0_H,
@@ -1193,6 +1246,9 @@ public:
   // predicate controlling addressing modes
   bool size_fits_all_mem_uses(AddPNode* addp, int shift);
 
+  // predicate controlling SVE2 vectorizedHashCode matching
+  bool vectorized_hashcode_sve_supported_type(const Node* n);
+
   // Convert BootTest condition to Assembler condition.
   // Replicate the logic of cmpOpOper::ccode() and cmpOpUOper::ccode().
   Assembler::Condition to_assembler_cond(BoolTest::mask cond);
@@ -1545,11 +1601,10 @@ bool unnecessary_release(const Node *n)
 
   MemBarNode *barrier = n->as_MemBar();
   if (!barrier->leading()) {
-    // Standalone MemBarRelease marked by C2AccessFence for release stores
-    // (e.g. Unsafe.putOrderedX / VarHandle.setRelease).
-    // When UseStlrForRelease is true, the store already uses stlr which
-    // provides the release ordering, so the dmb ish is unnecessary.
-    return UseStlrForRelease && barrier->standalone_release();
+    if (UseStlrForRelease && barrier->leading_release_store()) {
+      return true;
+    }
+    return false;
   } else {
     Node* trailing = barrier->trailing_membar();
     MemBarNode* trailing_mb = trailing->as_MemBar();
@@ -1919,10 +1974,6 @@ const Pipeline * MachEpilogNode::pipeline() const {
 }
 
 //=============================================================================
-
-// Figure out which register class each belongs in: rc_int, rc_float or
-// rc_stack.
-enum RC { rc_bad, rc_int, rc_float, rc_predicate, rc_stack };
 
 static enum RC rc_class(OptoReg::Name reg) {
 
@@ -2546,6 +2597,15 @@ bool size_fits_all_mem_uses(AddPNode* addp, int shift) {
   return true;
 }
 
+bool vectorized_hashcode_sve_supported_type(const Node* n) {
+  assert(n->Opcode() == Op_VectorizedHashCode, "unexpected node");
+  if (n->req() <= 5 || !n->in(5)->is_Con()) {
+    return false;
+  }
+  BasicType bt = (BasicType)n->in(5)->get_int();
+  return bt == T_BOOLEAN || bt == T_BYTE || bt == T_CHAR || bt == T_SHORT;
+}
+
 // Convert BootTest condition to Assembler condition.
 // Replicate the logic of cmpOpOper::ccode() and cmpOpUOper::ccode().
 Assembler::Condition to_assembler_cond(BoolTest::mask cond) {
@@ -2644,7 +2704,8 @@ bool is_vector_bitwise_not_pattern(Node* n, Node* m) {
 bool Matcher::pd_clone_node(Node* n, Node* m, Matcher::MStack& mstack) {
   if (is_vshift_con_pattern(n, m) ||
       is_vector_bitwise_not_pattern(n, m) ||
-      is_valid_sve_arith_imm_pattern(n, m)) {
+      is_valid_sve_arith_imm_pattern(n, m) ||
+      is_encode_and_store_pattern(n, m)) {
     mstack.push(m, Visit);
     return true;
   }
@@ -5181,6 +5242,123 @@ operand vReg()
   interface(REG_INTER);
 %}
 
+operand vRegA_V0()
+%{
+  constraint(ALLOC_IN_RC(v0a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V1()
+%{
+  constraint(ALLOC_IN_RC(v1a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V2()
+%{
+  constraint(ALLOC_IN_RC(v2a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V3()
+%{
+  constraint(ALLOC_IN_RC(v3a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V4()
+%{
+  constraint(ALLOC_IN_RC(v4a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V5()
+%{
+  constraint(ALLOC_IN_RC(v5a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V6()
+%{
+  constraint(ALLOC_IN_RC(v6a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V7()
+%{
+  constraint(ALLOC_IN_RC(v7a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V10()
+%{
+  constraint(ALLOC_IN_RC(v10a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V11()
+%{
+  constraint(ALLOC_IN_RC(v11a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V12()
+%{
+  constraint(ALLOC_IN_RC(v12a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V13()
+%{
+  constraint(ALLOC_IN_RC(v13a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
+operand vRegA_V14()
+%{
+  constraint(ALLOC_IN_RC(v14a_reg));
+  match(VecA);
+  op_cost(0);
+  format %{ %}
+  interface(REG_INTER);
+%}
+
 operand vecA()
 %{
   constraint(ALLOC_IN_RC(vectora_reg));
@@ -7120,7 +7298,7 @@ instruct loadP(iRegPNoSp dst, memory8 mem)
 instruct loadN(iRegNNoSp dst, memory4 mem)
 %{
   match(Set dst (LoadN mem));
-  predicate(!needs_acquiring_load(n));
+  predicate(!needs_acquiring_load(n) && n->as_Load()->barrier_data() == 0);
 
   ins_cost(4 * INSN_COST);
   format %{ "ldrw  $dst, $mem\t# compressed ptr" %}
@@ -7563,7 +7741,7 @@ instruct storeimmP0(immP0 zero, memory8 mem)
 instruct storeN(iRegN src, memory4 mem)
 %{
   match(Set mem (StoreN mem src));
-  predicate(!needs_releasing_store(n));
+  predicate(!needs_releasing_store(n) && n->as_Store()->barrier_data() == 0);
 
   ins_cost(INSN_COST);
   format %{ "strw  $src, $mem\t# compressed ptr" %}
@@ -7576,7 +7754,7 @@ instruct storeN(iRegN src, memory4 mem)
 instruct storeImmN0(immN0 zero, memory4 mem)
 %{
   match(Set mem (StoreN mem zero));
-  predicate(!needs_releasing_store(n));
+  predicate(!needs_releasing_store(n) && n->as_Store()->barrier_data() == 0);
 
   ins_cost(INSN_COST);
   format %{ "strw  zr, $mem\t# compressed ptr" %}
@@ -7810,6 +7988,7 @@ instruct loadP_volatile(iRegPNoSp dst, /* sync_memory*/indirect mem)
 instruct loadN_volatile(iRegNNoSp dst, /* sync_memory*/indirect mem)
 %{
   match(Set dst (LoadN mem));
+  predicate(n->as_Load()->barrier_data() == 0);
 
   ins_cost(VOLATILE_REF_COST);
   format %{ "ldarw  $dst, $mem\t# compressed ptr" %}
@@ -7977,6 +8156,7 @@ instruct storeimmP0_volatile(immP0 zero, /* sync_memory*/indirect mem)
 instruct storeN_volatile(iRegN src, /* sync_memory*/indirect mem)
 %{
   match(Set mem (StoreN mem src));
+  predicate(n->as_Store()->barrier_data() == 0);
 
   ins_cost(VOLATILE_REF_COST);
   format %{ "stlrw  $src, $mem\t# compressed ptr" %}
@@ -7989,6 +8169,7 @@ instruct storeN_volatile(iRegN src, /* sync_memory*/indirect mem)
 instruct storeimmN0_volatile(immN0 zero, /* sync_memory*/indirect mem)
 %{
   match(Set mem (StoreN mem zero));
+  predicate(n->as_Store()->barrier_data() == 0);
 
   ins_cost(VOLATILE_REF_COST);
   format %{ "stlrw  zr, $mem\t# compressed ptr" %}
@@ -8766,6 +8947,7 @@ instruct compareAndSwapP(iRegINoSp res, indirect mem, iRegP oldval, iRegP newval
 instruct compareAndSwapN(iRegINoSp res, indirect mem, iRegNNoSp oldval, iRegNNoSp newval, rFlagsReg cr) %{
 
   match(Set res (CompareAndSwapN mem (Binary oldval newval)));
+  predicate(n->as_LoadStore()->barrier_data() == 0);
   ins_cost(2 * VOLATILE_REF_COST);
 
   effect(KILL cr);
@@ -8880,7 +9062,7 @@ instruct compareAndSwapPAcq(iRegINoSp res, indirect mem, iRegP oldval, iRegP new
 
 instruct compareAndSwapNAcq(iRegINoSp res, indirect mem, iRegNNoSp oldval, iRegNNoSp newval, rFlagsReg cr) %{
 
-  predicate(needs_acquiring_load_exclusive(n));
+  predicate(needs_acquiring_load_exclusive(n) && n->as_LoadStore()->barrier_data() == 0);
   match(Set res (CompareAndSwapN mem (Binary oldval newval)));
   ins_cost(VOLATILE_REF_COST);
 
@@ -8985,6 +9167,7 @@ instruct compareAndExchangeL(iRegLNoSp res, indirect mem, iRegL oldval, iRegL ne
 // This pattern is generated automatically from cas.m4.
 // DO NOT EDIT ANYTHING IN THIS SECTION OF THE FILE
 instruct compareAndExchangeN(iRegNNoSp res, indirect mem, iRegN oldval, iRegN newval, rFlagsReg cr) %{
+  predicate(n->as_LoadStore()->barrier_data() == 0);
   match(Set res (CompareAndExchangeN mem (Binary oldval newval)));
   ins_cost(2 * VOLATILE_REF_COST);
   effect(TEMP_DEF res, KILL cr);
@@ -9094,7 +9277,7 @@ instruct compareAndExchangeLAcq(iRegLNoSp res, indirect mem, iRegL oldval, iRegL
 // This pattern is generated automatically from cas.m4.
 // DO NOT EDIT ANYTHING IN THIS SECTION OF THE FILE
 instruct compareAndExchangeNAcq(iRegNNoSp res, indirect mem, iRegN oldval, iRegN newval, rFlagsReg cr) %{
-  predicate(needs_acquiring_load_exclusive(n));
+  predicate(needs_acquiring_load_exclusive(n) && n->as_LoadStore()->barrier_data() == 0);
   match(Set res (CompareAndExchangeN mem (Binary oldval newval)));
   ins_cost(VOLATILE_REF_COST);
   effect(TEMP_DEF res, KILL cr);
@@ -9206,6 +9389,7 @@ instruct weakCompareAndSwapL(iRegINoSp res, indirect mem, iRegL oldval, iRegL ne
 // This pattern is generated automatically from cas.m4.
 // DO NOT EDIT ANYTHING IN THIS SECTION OF THE FILE
 instruct weakCompareAndSwapN(iRegINoSp res, indirect mem, iRegN oldval, iRegN newval, rFlagsReg cr) %{
+  predicate(n->as_LoadStore()->barrier_data() == 0);
   match(Set res (WeakCompareAndSwapN mem (Binary oldval newval)));
   ins_cost(2 * VOLATILE_REF_COST);
   effect(KILL cr);
@@ -9325,7 +9509,7 @@ instruct weakCompareAndSwapLAcq(iRegINoSp res, indirect mem, iRegL oldval, iRegL
 // This pattern is generated automatically from cas.m4.
 // DO NOT EDIT ANYTHING IN THIS SECTION OF THE FILE
 instruct weakCompareAndSwapNAcq(iRegINoSp res, indirect mem, iRegN oldval, iRegN newval, rFlagsReg cr) %{
-  predicate(needs_acquiring_load_exclusive(n));
+  predicate(needs_acquiring_load_exclusive(n) && n->as_LoadStore()->barrier_data() == 0);
   match(Set res (WeakCompareAndSwapN mem (Binary oldval newval)));
   ins_cost(VOLATILE_REF_COST);
   effect(KILL cr);
@@ -9386,6 +9570,7 @@ instruct get_and_setL(indirect mem, iRegL newv, iRegLNoSp prev) %{
 %}
 
 instruct get_and_setN(indirect mem, iRegN newv, iRegINoSp prev) %{
+  predicate(n->as_LoadStore()->barrier_data() == 0);
   match(Set prev (GetAndSetN mem newv));
   ins_cost(2 * VOLATILE_REF_COST);
   format %{ "atomic_xchgw $prev, $newv, [$mem]" %}
@@ -9429,7 +9614,7 @@ instruct get_and_setLAcq(indirect mem, iRegL newv, iRegLNoSp prev) %{
 %}
 
 instruct get_and_setNAcq(indirect mem, iRegN newv, iRegINoSp prev) %{
-  predicate(needs_acquiring_load_exclusive(n));
+  predicate(needs_acquiring_load_exclusive(n) && n->as_LoadStore()->barrier_data() == 0);
   match(Set prev (GetAndSetN mem newv));
   ins_cost(VOLATILE_REF_COST);
   format %{ "atomic_xchgw_acq $prev, $newv, [$mem]" %}
@@ -15262,6 +15447,7 @@ instruct MoveL2D_reg_reg(vRegD dst, iRegL src) %{
 
 instruct clearArray_reg_reg(iRegL_R11 cnt, iRegP_R10 base, Universe dummy, rFlagsReg cr)
 %{
+  predicate(!UseSVESmallBlockZeroing);
   match(Set dummy (ClearArray cnt base));
   effect(USE_KILL cnt, USE_KILL base, KILL cr);
 
@@ -15271,6 +15457,27 @@ instruct clearArray_reg_reg(iRegL_R11 cnt, iRegP_R10 base, Universe dummy, rFlag
   ins_encode %{
     address tpc = __ zero_words($base$$Register, $cnt$$Register);
     if (tpc == NULL) {
+      ciEnv::current()->record_failure("CodeCache is full");
+      return;
+    }
+  %}
+
+  ins_pipe(pipe_class_memory);
+%}
+
+instruct clearArray_reg_reg_sve(iRegL_R11 cnt, iRegP_R10 base, Universe dummy,
+                                vRegA_V0 vtmp0, pRegGov_P0 ptmp0, rFlagsReg cr)
+%{
+  predicate(UseSVESmallBlockZeroing);
+  match(Set dummy (ClearArray cnt base));
+  effect(USE_KILL cnt, USE_KILL base, TEMP vtmp0, TEMP ptmp0, KILL cr);
+
+  ins_cost(4 * INSN_COST);
+  format %{ "ClearArray $cnt, $base" %}
+
+  ins_encode %{
+    address tpc = __ zero_words($base$$Register, $cnt$$Register);
+    if (tpc == nullptr) {
       ciEnv::current()->record_failure("CodeCache is full");
       return;
     }
@@ -17176,7 +17383,8 @@ instruct stringU_indexof_char_sve(iRegP_R1 str1, iRegI_R2 cnt1, iRegI_R3 ch,
 instruct string_equalsL(iRegP_R1 str1, iRegP_R3 str2, iRegI_R4 cnt,
                         iRegI_R0 result, rFlagsReg cr)
 %{
-  predicate(((StrEqualsNode*)n)->encoding() == StrIntrinsicNode::LL);
+  predicate(!UseSIMDForStringEquals &&
+            ((StrEqualsNode*)n)->encoding() == StrIntrinsicNode::LL);
   match(Set result (StrEquals (Binary str1 str2) cnt));
   effect(USE_KILL str1, USE_KILL str2, USE_KILL cnt, KILL cr);
 
@@ -17192,7 +17400,8 @@ instruct string_equalsL(iRegP_R1 str1, iRegP_R3 str2, iRegI_R4 cnt,
 instruct string_equalsU(iRegP_R1 str1, iRegP_R3 str2, iRegI_R4 cnt,
                         iRegI_R0 result, rFlagsReg cr)
 %{
-  predicate(((StrEqualsNode*)n)->encoding() == StrIntrinsicNode::UU);
+  predicate(!UseSIMDForStringEquals &&
+            ((StrEqualsNode*)n)->encoding() == StrIntrinsicNode::UU);
   match(Set result (StrEquals (Binary str1 str2) cnt));
   effect(USE_KILL str1, USE_KILL str2, USE_KILL cnt, KILL cr);
 
@@ -17201,6 +17410,62 @@ instruct string_equalsU(iRegP_R1 str1, iRegP_R3 str2, iRegI_R4 cnt,
     // Count is in 8-bit bytes; non-Compact chars are 16 bits.
     __ string_equals($str1$$Register, $str2$$Register,
                      $result$$Register, $cnt$$Register, 2);
+  %}
+  ins_pipe(pipe_class_memory);
+%}
+
+instruct string_equalsL_simd(iRegP_R1 str1, iRegP_R3 str2, iRegI_R4 cnt,
+                             iRegI_R0 result, iRegP_R2 tmp1, iRegP_R5 tmp2,
+                             iRegP_R10 tmp3, vRegD_V0 vtmp0, vRegD_V1 vtmp1,
+                             vRegD_V2 vtmp2, vRegD_V3 vtmp3, vRegD_V4 vtmp4,
+                             vRegD_V5 vtmp5, vRegD_V6 vtmp6, vRegD_V7 vtmp7,
+                             rFlagsReg cr)
+%{
+  predicate(UseSIMDForStringEquals &&
+            ((StrEqualsNode*)n)->encoding() == StrIntrinsicNode::LL);
+  match(Set result (StrEquals (Binary str1 str2) cnt));
+  effect(USE_KILL str1, USE_KILL str2, USE_KILL cnt, TEMP tmp1, TEMP tmp2,
+         TEMP tmp3, TEMP vtmp0, TEMP vtmp1, TEMP vtmp2, TEMP vtmp3,
+         TEMP vtmp4, TEMP vtmp5, TEMP vtmp6, TEMP vtmp7, KILL cr);
+
+  format %{ "String Equals SIMD $str1,$str2,$cnt -> $result # KILL $tmp1 $tmp2 $tmp3 V0-V7 cr" %}
+  ins_encode %{
+    // Count is in 8-bit bytes; non-Compact chars are 16 bits.
+    address tpc = __ string_equals($str1$$Register, $str2$$Register,
+                                   $result$$Register, $cnt$$Register,
+                                   1, true, $tmp1$$Register, $tmp3$$Register);
+    if (tpc == nullptr) {
+      ciEnv::current()->record_failure("CodeCache is full");
+      return;
+    }
+  %}
+  ins_pipe(pipe_class_memory);
+%}
+
+instruct string_equalsU_simd(iRegP_R1 str1, iRegP_R3 str2, iRegI_R4 cnt,
+                             iRegI_R0 result, iRegP_R2 tmp1, iRegP_R5 tmp2,
+                             iRegP_R10 tmp3, vRegD_V0 vtmp0, vRegD_V1 vtmp1,
+                             vRegD_V2 vtmp2, vRegD_V3 vtmp3, vRegD_V4 vtmp4,
+                             vRegD_V5 vtmp5, vRegD_V6 vtmp6, vRegD_V7 vtmp7,
+                             rFlagsReg cr)
+%{
+  predicate(UseSIMDForStringEquals &&
+            ((StrEqualsNode*)n)->encoding() == StrIntrinsicNode::UU);
+  match(Set result (StrEquals (Binary str1 str2) cnt));
+  effect(USE_KILL str1, USE_KILL str2, USE_KILL cnt, TEMP tmp1, TEMP tmp2,
+         TEMP tmp3, TEMP vtmp0, TEMP vtmp1, TEMP vtmp2, TEMP vtmp3,
+         TEMP vtmp4, TEMP vtmp5, TEMP vtmp6, TEMP vtmp7, KILL cr);
+
+  format %{ "String Equals SIMD $str1,$str2,$cnt -> $result # KILL $tmp1 $tmp2 $tmp3 V0-V7 cr" %}
+  ins_encode %{
+    // Count is in 8-bit bytes; non-Compact chars are 16 bits.
+    address tpc = __ string_equals($str1$$Register, $str2$$Register,
+                                   $result$$Register, $cnt$$Register,
+                                   2, true, $tmp1$$Register, $tmp3$$Register);
+    if (tpc == nullptr) {
+      ciEnv::current()->record_failure("CodeCache is full");
+      return;
+    }
   %}
   ins_pipe(pipe_class_memory);
 %}
@@ -17260,9 +17525,43 @@ instruct arrays_hashcode(iRegP_R1 ary, iRegI_R2 cnt, iRegI_R0 result, immI basic
                          vRegD_V4 vtmp4, vRegD_V5 vtmp5, vRegD_V6 vtmp6, vRegD_V7 vtmp7,
                          vRegD_V12 vtmp8, vRegD_V13 vtmp9, rFlagsReg cr)
 %{
+  predicate(!(UseSVEHashCodeIntrinsic && vectorized_hashcode_sve_supported_type(n)));
   match(Set result (VectorizedHashCode (Binary ary cnt) (Binary result basic_type)));
   effect(TEMP vtmp0, TEMP vtmp1, TEMP vtmp2, TEMP vtmp3, TEMP vtmp4, TEMP vtmp5, TEMP vtmp6,
          TEMP vtmp7, TEMP vtmp8, TEMP vtmp9, USE_KILL ary, USE_KILL cnt, USE basic_type, KILL cr);
+
+  format %{ "Array HashCode array[] $ary,$cnt,$result,$basic_type -> $result   // KILL all" %}
+  ins_encode %{
+    address tpc = __ arrays_hashcode($ary$$Register, $cnt$$Register, $result$$Register,
+                                     $vtmp3$$FloatRegister, $vtmp2$$FloatRegister,
+                                     $vtmp1$$FloatRegister, $vtmp0$$FloatRegister,
+                                     $vtmp4$$FloatRegister, $vtmp5$$FloatRegister,
+                                     $vtmp6$$FloatRegister, $vtmp7$$FloatRegister,
+                                     $vtmp8$$FloatRegister, $vtmp9$$FloatRegister,
+                                     (BasicType)$basic_type$$constant);
+    if (tpc == nullptr) {
+      ciEnv::current()->record_failure("CodeCache is full");
+      return;
+    }
+  %}
+  ins_pipe(pipe_class_memory);
+%}
+
+instruct arrays_hashcode_sve(iRegP_R1 ary, iRegI_R2 cnt, iRegI_R0 result, immI basic_type,
+                             vRegA_V0 vtmp0, vRegA_V1 vtmp1, vRegA_V2 vtmp2, vRegA_V3 vtmp3,
+                             vRegA_V4 vtmp4, vRegA_V5 vtmp5, vRegA_V6 vtmp6, vRegA_V7 vtmp7,
+                             vRegA_V10 vtmp10, vRegA_V11 vtmp11,
+                             vRegA_V12 vtmp8, vRegA_V13 vtmp9, vRegA_V14 vtmp14,
+                             pRegGov_P0 ptmp0, pRegGov_P1 ptmp1, rFlagsReg cr)
+%{
+  predicate(UseSVEHashCodeIntrinsic && vectorized_hashcode_sve_supported_type(n));
+  match(Set result (VectorizedHashCode (Binary ary cnt) (Binary result basic_type)));
+  // The large-array SVE2 stubs use fixed whole-Z scratch registers
+  // (v0-v7, v10-v14) plus fixed predicate registers p0/p1.
+  effect(TEMP vtmp0, TEMP vtmp1, TEMP vtmp2, TEMP vtmp3, TEMP vtmp4, TEMP vtmp5, TEMP vtmp6,
+         TEMP vtmp7, TEMP vtmp10, TEMP vtmp11, TEMP vtmp8, TEMP vtmp9, TEMP vtmp14,
+         TEMP ptmp0, TEMP ptmp1,
+         USE_KILL ary, USE_KILL cnt, USE basic_type, KILL cr);
 
   format %{ "Array HashCode array[] $ary,$cnt,$result,$basic_type -> $result   // KILL all" %}
   ins_encode %{
