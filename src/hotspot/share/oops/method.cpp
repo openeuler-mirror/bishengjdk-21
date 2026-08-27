@@ -113,6 +113,7 @@ Method::Method(ConstMethod* xconst, AccessFlags access_flags, Symbol* name) {
 #ifdef AARCH64
   set_first_invoke_init_order(INVALID_FIRST_INVOKE_INIT_ORDER);
   set_compiled_by_jprofilecache(false);
+  set_jpc_method_holder(nullptr);
 
 #ifndef PRODUCT
   set_deopted_by_jprofilecache(false);
@@ -137,6 +138,15 @@ Method::Method(ConstMethod* xconst, AccessFlags access_flags, Symbol* name) {
 // Release Method*.  The nmethod will be gone when we get here because
 // we've walked the code cache.
 void Method::deallocate_contents(ClassLoaderData* loader_data) {
+#ifdef AARCH64
+  // ProfileCacheMethodHold keeps a non-owning Method*; detach it before this
+  // Method and its ConstMethod are returned to metaspace.
+  ProfileCacheMethodHold* holder = jpc_method_holder();
+  if (holder != nullptr) {
+    holder->clear_resolved_method(this);
+    set_jpc_method_holder(nullptr);
+  }
+#endif
   MetadataFactory::free_metadata(loader_data, constMethod());
   set_constMethod(nullptr);
   MetadataFactory::free_metadata(loader_data, method_data());
