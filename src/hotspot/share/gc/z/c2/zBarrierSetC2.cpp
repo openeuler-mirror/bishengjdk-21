@@ -124,10 +124,10 @@ public:
 
 typedef ZArenaHashtable<intptr_t, bool, 4> ZOffsetTable;
 
-#ifndef AARCH64
-class ZBarrierSetC2State : public ArenaObj {
-#else /* AARCH64 */
+#ifdef AARCH64
 class ZBarrierSetC2State : public BarrierSetC2State {
+#else /* AARCH64 */
+class ZBarrierSetC2State : public ArenaObj {
 #endif /* AARCH64 */
 private:
   GrowableArray<ZBarrierStubC2*>* _stubs;
@@ -138,16 +138,16 @@ private:
   int                             _stubs_start_offset;
 
 public:
-#ifndef AARCH64
+#ifdef AARCH64
   ZBarrierSetC2State(Arena* arena)
-    : _stubs(new (arena) GrowableArray<ZBarrierStubC2*>(arena, 8,  0, nullptr)),
-      _live(arena),
+    : BarrierSetC2State(arena),
+      _stubs(new (arena) GrowableArray<ZBarrierStubC2*>(arena, 8,  0, nullptr)),
       _trampoline_stubs_count(0),
       _stubs_start_offset(0) {}
 #else /* AARCH64 */
   ZBarrierSetC2State(Arena* arena)
-    : BarrierSetC2State(arena),
-      _stubs(new (arena) GrowableArray<ZBarrierStubC2*>(arena, 8,  0, nullptr)),
+    : _stubs(new (arena) GrowableArray<ZBarrierStubC2*>(arena, 8,  0, nullptr)),
+      _live(arena),
       _trampoline_stubs_count(0),
       _stubs_start_offset(0) {}
 #endif /* AARCH64 */
@@ -156,7 +156,16 @@ public:
     return _stubs;
   }
 
-#ifndef AARCH64
+#ifdef AARCH64
+  bool needs_liveness_data(const MachNode* mach) const {
+    // Don't need liveness data for nodes without barriers
+    return mach->barrier_data() != ZBarrierElided;
+  }
+
+  bool needs_livein_data() const {
+    return true;
+  }
+#else /* AARCH64 */
   RegMask* live(const Node* node) {
     if (!node->is_Mach()) {
       // Don't need liveness for non-MachNodes
@@ -176,15 +185,6 @@ public:
     }
 
     return live;
-  }
-#else /* AARCH64 */
-  bool needs_liveness_data(const MachNode* mach) const {
-    // Don't need liveness data for nodes without barriers
-    return mach->barrier_data() != ZBarrierElided;
-  }
-
-  bool needs_livein_data() const {
-    return true;
   }
 #endif /* AARCH64 */
 
@@ -568,7 +568,12 @@ void ZBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* a
     return;
   }
 
-#ifndef AARCH64
+#ifdef AARCH64
+  // Clone instance or array where 'src' is only known to be an object (ary_ptr
+  // is null). This can happen in bytecode generated dynamically to implement
+  // reflective array clones.
+  clone_in_runtime(phase, ac, ZBarrierSetRuntime::clone_addr(), "ZBarrierSetRuntime::clone");
+#else /* AARCH64 */
   // Clone instance
   Node* const ctrl       = ac->in(TypeFunc::Control);
   Node* const mem        = ac->in(TypeFunc::Memory);
@@ -594,11 +599,6 @@ void ZBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* a
                                            phase->top());
   phase->transform_later(call);
   phase->igvn().replace_node(ac, call);
-#else /* AARCH64 */
-  // Clone instance or array where 'src' is only known to be an object (ary_ptr
-  // is null). This can happen in bytecode generated dynamically to implement
-  // reflective array clones.
-  clone_in_runtime(phase, ac, ZBarrierSetRuntime::clone_addr(), "ZBarrierSetRuntime::clone");
 #endif /* AARCH64 */
 }
 
@@ -946,14 +946,14 @@ void ZBarrierSetC2::analyze_dominating_barriers() const {
   }
 
   // Step 2 - Find dominating accesses or allocations for each access
-#ifndef AARCH64
-  analyze_dominating_barriers_impl(loads, load_dominators);
-  analyze_dominating_barriers_impl(stores, store_dominators);
-  analyze_dominating_barriers_impl(atomics, atomic_dominators);
-#else /* AARCH64 */
+#ifdef AARCH64
   elide_dominated_barriers(loads, load_dominators);
   elide_dominated_barriers(stores, store_dominators);
   elide_dominated_barriers(atomics, atomic_dominators);
+#else /* AARCH64 */
+  analyze_dominating_barriers_impl(loads, load_dominators);
+  analyze_dominating_barriers_impl(stores, store_dominators);
+  analyze_dominating_barriers_impl(atomics, atomic_dominators);
 #endif /* AARCH64 */
 }
 

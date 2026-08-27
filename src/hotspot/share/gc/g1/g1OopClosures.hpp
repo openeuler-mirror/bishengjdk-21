@@ -87,38 +87,38 @@ public:
 
 // This closure is applied to the fields of the objects that have just been copied during evacuation.
 class G1ScanEvacuatedObjClosure : public G1ScanClosureBase {
-#ifndef AARCH64
-  friend class G1SkipCardEnqueueSetter;
-#else /* AARCH64 */
+#ifdef AARCH64
   friend class G1SkipCardMarkSetter;
+#else /* AARCH64 */
+  friend class G1SkipCardEnqueueSetter;
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  enum SkipCardEnqueueTristate {
-    False = 0,
-    True,
-    Uninitialized
-  };
-#else /* AARCH64 */
+#ifdef AARCH64
   enum SkipCardMarkTristate {
     False = 0,
     True,
     Uninitialized
   };
+#else /* AARCH64 */
+  enum SkipCardEnqueueTristate {
+    False = 0,
+    True,
+    Uninitialized
+  };
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  SkipCardEnqueueTristate _skip_card_enqueue;
-#else /* AARCH64 */
+#ifdef AARCH64
   SkipCardMarkTristate _skip_card_mark;
+#else /* AARCH64 */
+  SkipCardEnqueueTristate _skip_card_enqueue;
 #endif /* AARCH64 */
 
 public:
   G1ScanEvacuatedObjClosure(G1CollectedHeap* g1h, G1ParScanThreadState* par_scan_state) :
-#ifndef AARCH64
-    G1ScanClosureBase(g1h, par_scan_state), _skip_card_enqueue(Uninitialized) { }
-#else /* AARCH64 */
+#ifdef AARCH64
     G1ScanClosureBase(g1h, par_scan_state), _skip_card_mark(Uninitialized) { }
+#else /* AARCH64 */
+    G1ScanClosureBase(g1h, par_scan_state), _skip_card_enqueue(Uninitialized) { }
 #endif /* AARCH64 */
 
   template <class T> void do_oop_work(T* p);
@@ -138,22 +138,7 @@ public:
 #endif /* AARCH64 */
 };
 
-#ifndef AARCH64
-// RAII object to properly set the _skip_card_enqueue field in G1ScanEvacuatedObjClosure.
-class G1SkipCardEnqueueSetter : public StackObj {
-  G1ScanEvacuatedObjClosure* _closure;
-
-public:
-  G1SkipCardEnqueueSetter(G1ScanEvacuatedObjClosure* closure, bool skip_card_enqueue) : _closure(closure) {
-    assert(_closure->_skip_card_enqueue == G1ScanEvacuatedObjClosure::Uninitialized, "Must not be set");
-    _closure->_skip_card_enqueue = skip_card_enqueue ? G1ScanEvacuatedObjClosure::True : G1ScanEvacuatedObjClosure::False;
-  }
-
-  ~G1SkipCardEnqueueSetter() {
-    DEBUG_ONLY(_closure->_skip_card_enqueue = G1ScanEvacuatedObjClosure::Uninitialized;)
-  }
-};
-#else /* AARCH64 */
+#ifdef AARCH64
 // RAII object to properly set the _skip_card_mark field in G1ScanEvacuatedObjClosure.
 class G1SkipCardMarkSetter : public StackObj {
   G1ScanEvacuatedObjClosure* _closure;
@@ -166,6 +151,21 @@ public:
 
   ~G1SkipCardMarkSetter() {
     DEBUG_ONLY(_closure->_skip_card_mark = G1ScanEvacuatedObjClosure::Uninitialized;)
+  }
+};
+#else /* AARCH64 */
+// RAII object to properly set the _skip_card_enqueue field in G1ScanEvacuatedObjClosure.
+class G1SkipCardEnqueueSetter : public StackObj {
+  G1ScanEvacuatedObjClosure* _closure;
+
+public:
+  G1SkipCardEnqueueSetter(G1ScanEvacuatedObjClosure* closure, bool skip_card_enqueue) : _closure(closure) {
+    assert(_closure->_skip_card_enqueue == G1ScanEvacuatedObjClosure::Uninitialized, "Must not be set");
+    _closure->_skip_card_enqueue = skip_card_enqueue ? G1ScanEvacuatedObjClosure::True : G1ScanEvacuatedObjClosure::False;
+  }
+
+  ~G1SkipCardEnqueueSetter() {
+    DEBUG_ONLY(_closure->_skip_card_enqueue = G1ScanEvacuatedObjClosure::Uninitialized;)
   }
 };
 #endif /* AARCH64 */
@@ -256,12 +256,12 @@ class G1ConcurrentRefineOopClosure: public BasicOopIterateClosure {
 public:
   G1ConcurrentRefineOopClosure(G1CollectedHeap* g1h, uint worker_id) :
     _g1h(g1h),
-#ifndef AARCH64
-    _worker_id(worker_id) {
-#else /* AARCH64 */
+#ifdef AARCH64
     _worker_id(worker_id),
     _has_ref_to_cset(false),
     _has_ref_to_old(false) {
+#else /* AARCH64 */
+    _worker_id(worker_id) {
 #endif /* AARCH64 */
   }
 

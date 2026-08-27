@@ -107,10 +107,10 @@ public:
   double worker_cost() const override {
     assert(_evac_failure_regions->evacuation_failed(), "Should not call this if not executed");
 
-#ifndef AARCH64
-    double workers_per_region = (double)G1CollectedHeap::get_chunks_per_region() / G1RestoreRetainedRegionChunksPerWorker;
-#else /* AARCH64 */
+#ifdef AARCH64
     double workers_per_region = (double)G1CollectedHeap::get_chunks_per_region_for_scan() / G1RestoreRetainedRegionChunksPerWorker;
+#else /* AARCH64 */
+    double workers_per_region = (double)G1CollectedHeap::get_chunks_per_region() / G1RestoreRetainedRegionChunksPerWorker;
 #endif /* AARCH64 */
     return workers_per_region * _evac_failure_regions->num_regions_failed_evacuation();
   }
@@ -349,11 +349,7 @@ class G1PostEvacuateCollectionSetCleanupTask2::ProcessEvacuationFailedRegionsTas
   public:
 
     bool do_heap_region(HeapRegion* r) override {
-#ifndef AARCH64
-      assert(r->bottom() == r->top_at_mark_start(),
-             "TAMS should have been reset for region %u", r->hrm_index());
-      G1CollectedHeap::heap()->clear_bitmap_for_region(r);
-#else /* AARCH64 */
+#ifdef AARCH64
       G1CollectedHeap* g1h = G1CollectedHeap::heap();
       G1ConcurrentMark* cm = g1h->concurrent_mark();
 
@@ -374,18 +370,22 @@ class G1PostEvacuateCollectionSetCleanupTask2::ProcessEvacuationFailedRegionsTas
         assert(cm->mark_bitmap()->get_next_marked_addr(r->bottom(), r->top_at_mark_start()) != r->top_at_mark_start(),
                "Marks must be on bitmap for region %u", r->hrm_index());
       }
+#else /* AARCH64 */
+      assert(r->bottom() == r->top_at_mark_start(),
+             "TAMS should have been reset for region %u", r->hrm_index());
+      G1CollectedHeap::heap()->clear_bitmap_for_region(r);
 #endif /* AARCH64 */
       return false;
     }
   };
 
 public:
-#ifndef AARCH64
-  ProcessEvacuationFailedRegionsTask(G1EvacFailureRegions* evac_failure_regions) :
-    G1AbstractSubTask(G1GCPhaseTimes::ClearRetainedRegionBitmaps),
-#else /* AARCH64 */
+#ifdef AARCH64
   ProcessEvacuationFailedRegionsTask(G1EvacFailureRegions* evac_failure_regions) :
     G1AbstractSubTask(G1GCPhaseTimes::ProcessEvacuationFailedRegions),
+#else /* AARCH64 */
+  ProcessEvacuationFailedRegionsTask(G1EvacFailureRegions* evac_failure_regions) :
+    G1AbstractSubTask(G1GCPhaseTimes::ClearRetainedRegionBitmaps),
 #endif /* AARCH64 */
     _evac_failure_regions(evac_failure_regions),
     _claimer(0) {
@@ -598,19 +598,17 @@ class FreeCSetClosure : public HeapRegionClosure {
     p->record_or_add_thread_work_item(G1GCPhaseTimes::RestoreRetainedRegions,
                                       _worker_id,
                                       1,
-#ifndef AARCH64
-                                      G1GCPhaseTimes::RestoreRetainedRegionsNum);
-#else /* AARCH64 */
+#ifdef AARCH64
                                       G1GCPhaseTimes::RestoreRetainedRegionsFailedNum);
+#else /* AARCH64 */
+                                      G1GCPhaseTimes::RestoreRetainedRegionsNum);
 #endif /* AARCH64 */
 
 #ifdef AARCH64
     bool retain_region = _g1h->policy()->should_retain_evac_failed_region(r);
 #endif /* AARCH64 */
     // Update the region state due to the failed evacuation.
-#ifndef AARCH64
-    r->handle_evacuation_failure();
-#else /* AARCH64 */
+#ifdef AARCH64
     r->handle_evacuation_failure(retain_region);
     assert(r->is_old(), "must already be relabelled as old");
 
@@ -620,6 +618,8 @@ class FreeCSetClosure : public HeapRegionClosure {
     }
     assert(retain_region == r->rem_set()->is_tracked(),
            "retained regions must keep their remembered set tracked");
+#else /* AARCH64 */
+    r->handle_evacuation_failure();
 #endif /* AARCH64 */
 
     // Add region to old set, need to hold lock.
@@ -647,11 +647,11 @@ public:
       _young_time(),
       _non_young_time(),
       _stats(stats),
-#ifndef AARCH64
-      _evac_failure_regions(evac_failure_regions) { }
-#else /* AARCH64 */
+#ifdef AARCH64
       _evac_failure_regions(evac_failure_regions),
       _num_retained_regions(0) { }
+#else /* AARCH64 */
+      _evac_failure_regions(evac_failure_regions) { }
 #endif /* AARCH64 */
 
   virtual bool do_heap_region(HeapRegion* r) {
@@ -784,14 +784,14 @@ class G1PostEvacuateCollectionSetCleanupTask2::ResizeTLABsTask : public G1Abstra
   static const uint ThreadsPerWorker = 250;
 
 public:
-#ifndef AARCH64
-  ResizeTLABsTask() : G1AbstractSubTask(G1GCPhaseTimes::ResizeThreadLABs), _claimer(ThreadsPerWorker) { }
-#else /* AARCH64 */
+#ifdef AARCH64
   ResizeTLABsTask()
     : G1AbstractSubTask(G1GCPhaseTimes::ResizeThreadLABs), _claimer(ThreadsPerWorker)
   {
     G1BarrierSet::g1_barrier_set()->swap_global_card_table();
   }
+#else /* AARCH64 */
+  ResizeTLABsTask() : G1AbstractSubTask(G1GCPhaseTimes::ResizeThreadLABs), _claimer(ThreadsPerWorker) { }
 #endif /* AARCH64 */
 
   void do_work(uint worker_id) override {
@@ -799,14 +799,14 @@ public:
     public:
 
       void do_thread(Thread* thread) {
-#ifndef AARCH64
-        static_cast<JavaThread*>(thread)->tlab().resize();
-#else /* AARCH64 */
+#ifdef AARCH64
         if (UseTLAB && ResizeTLAB) {
           static_cast<JavaThread*>(thread)->tlab().resize();
         }
 
         G1BarrierSet::g1_barrier_set()->update_card_table_base(thread);
+#else /* AARCH64 */
+        static_cast<JavaThread*>(thread)->tlab().resize();
 #endif /* AARCH64 */
       }
     } cl;
@@ -832,23 +832,23 @@ G1PostEvacuateCollectionSetCleanupTask2::G1PostEvacuateCollectionSetCleanupTask2
 
   if (evac_failure_regions->evacuation_failed()) {
     add_parallel_task(new RestorePreservedMarksTask(per_thread_states->preserved_marks_set()));
-#ifndef AARCH64
+#ifdef AARCH64
+    add_parallel_task(new ProcessEvacuationFailedRegionsTask(evac_failure_regions));
+#else /* AARCH64 */
     // Keep marks on bitmaps in retained regions during concurrent start - they will all be old.
     if (!G1CollectedHeap::heap()->collector_state()->in_concurrent_start_gc()) {
       add_parallel_task(new ProcessEvacuationFailedRegionsTask(evac_failure_regions));
     }
-#else /* AARCH64 */
-    add_parallel_task(new ProcessEvacuationFailedRegionsTask(evac_failure_regions));
 #endif /* AARCH64 */
   }
 
-#ifndef AARCH64
+#ifdef AARCH64
+  add_parallel_task(new ResizeTLABsTask());
+#else /* AARCH64 */
   add_parallel_task(new RedirtyLoggedCardsTask(per_thread_states->rdcqs(), evac_failure_regions));
   if (UseTLAB && ResizeTLAB) {
     add_parallel_task(new ResizeTLABsTask());
   }
-#else /* AARCH64 */
-  add_parallel_task(new ResizeTLABsTask());
 #endif /* AARCH64 */
   add_parallel_task(new FreeCollectionSetTask(evacuation_info,
                                               per_thread_states->surviving_young_words(),

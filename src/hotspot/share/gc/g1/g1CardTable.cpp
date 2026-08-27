@@ -28,20 +28,7 @@
 #include "gc/shared/memset_with_concurrent_readers.hpp"
 #include "logging/log.hpp"
 
-#ifndef AARCH64
-void G1CardTable::g1_mark_as_young(const MemRegion& mr) {
-  CardValue *const first = byte_for(mr.start());
-  CardValue *const last = byte_after(mr.last());
-
-  memset_with_concurrent_readers(first, g1_young_gen, last - first);
-}
-
-#ifndef PRODUCT
-void G1CardTable::verify_g1_young_region(MemRegion mr) {
-  verify_region(mr, g1_young_gen,  true);
-}
-#endif
-#else
+#ifdef AARCH64
 void G1CardTable::verify_region(MemRegion mr, CardValue val, bool val_equals) {
   if (mr.is_empty()) {
     return;
@@ -73,6 +60,19 @@ void G1CardTable::verify_region(MemRegion mr, CardValue val, bool val_equals) {
   }
   guarantee(!failures, "there should not have been any failures");
 }
+#else
+void G1CardTable::g1_mark_as_young(const MemRegion& mr) {
+  CardValue *const first = byte_for(mr.start());
+  CardValue *const last = byte_after(mr.last());
+
+  memset_with_concurrent_readers(first, g1_young_gen, last - first);
+}
+
+#ifndef PRODUCT
+void G1CardTable::verify_g1_young_region(MemRegion mr) {
+  verify_region(mr, g1_young_gen,  true);
+}
+#endif
 #endif
 
 void G1CardTableChangedListener::on_commit(uint start_idx, size_t num_regions, bool zero_filled) {
@@ -103,10 +103,10 @@ void G1CardTable::initialize(G1RegionToSpaceMapper* mapper) {
 }
 
 bool G1CardTable::is_in_young(const void* p) const {
-#ifndef AARCH64
+#ifdef AARCH64
+  return G1CollectedHeap::heap()->heap_region_containing(p)->is_young();
+#else /* AARCH64 */
   volatile CardValue* card = byte_for(p);
   return *card == G1CardTable::g1_young_card_val();
-#else /* AARCH64 */
-  return G1CollectedHeap::heap()->heap_region_containing(p)->is_young();
 #endif /* AARCH64 */
 }

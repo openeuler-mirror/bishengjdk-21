@@ -34,10 +34,10 @@ template <class T>
 class WorkerDataArray  : public CHeapObj<mtGC> {
   friend class WDAPrinter;
 public:
-#ifndef AARCH64
-  static const uint MaxThreadWorkItems = 9;
-#else /* AARCH64 */
+#ifdef AARCH64
   static const uint MaxThreadWorkItems = 10;
+#else /* AARCH64 */
+  static const uint MaxThreadWorkItems = 9;
 #endif /* AARCH64 */
 private:
   T*          _data;

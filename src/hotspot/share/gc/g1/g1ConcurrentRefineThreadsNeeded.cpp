@@ -62,7 +62,11 @@ void G1ConcurrentRefineThreadsNeeded::update(uint active_threads,
 #endif /* AARCH64 */
   const G1Analytics* analytics = _policy->analytics();
 
-#ifndef AARCH64
+#ifdef AARCH64
+  double incoming_rate = analytics->predict_dirtied_cards_rate_ms();
+  double raw_cards = incoming_rate * _predicted_time_until_next_gc_ms;
+  size_t incoming_cards = static_cast<size_t>(raw_cards);
+#else /* AARCH64 */
   // Estimate time until next GC, based on remaining bytes available for
   // allocation and the allocation rate.
   double alloc_region_rate = analytics->predict_alloc_rate_ms();
@@ -81,10 +85,6 @@ void G1ConcurrentRefineThreadsNeeded::update(uint active_threads,
     double raw_time_ms = available_bytes / alloc_bytes_rate;
     _predicted_time_until_next_gc_ms = MIN2(raw_time_ms, one_hour_ms);
   }
-#else /* AARCH64 */
-  double incoming_rate = analytics->predict_dirtied_cards_rate_ms();
-  double raw_cards = incoming_rate * _predicted_time_until_next_gc_ms;
-  size_t incoming_cards = static_cast<size_t>(raw_cards);
 #endif /* AARCH64 */
 
 #ifndef AARCH64
@@ -150,22 +150,22 @@ void G1ConcurrentRefineThreadsNeeded::update(uint active_threads,
   double rthreads = nthreads;
 #endif /* AARCH64 */
   if (_predicted_time_until_next_gc_ms <= _update_period_ms * 5.0) {
-#ifndef AARCH64
-    nthreads = ::ceil(nthreads);
-#else /* AARCH64 */
+#ifdef AARCH64
     rthreads = ::ceil(nthreads);
+#else /* AARCH64 */
+    nthreads = ::ceil(nthreads);
 #endif /* AARCH64 */
   } else {
-#ifndef AARCH64
-    nthreads = ::round(nthreads);
-#else /* AARCH64 */
+#ifdef AARCH64
     rthreads = ::round(nthreads);
+#else /* AARCH64 */
+    nthreads = ::round(nthreads);
 #endif /* AARCH64 */
   }
 
-#ifndef AARCH64
-  _threads_needed = static_cast<uint>(MIN2<size_t>(nthreads, UINT_MAX));
-#else /* AARCH64 */
+#ifdef AARCH64
   _threads_needed = static_cast<uint>(MIN2<size_t>(rthreads, UINT_MAX));
+#else /* AARCH64 */
+  _threads_needed = static_cast<uint>(MIN2<size_t>(nthreads, UINT_MAX));
 #endif /* AARCH64 */
 }

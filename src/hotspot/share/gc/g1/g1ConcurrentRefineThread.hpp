@@ -56,11 +56,11 @@ class G1ConcurrentRefineThread: public ConcurrentGCThread {
 
   NONCOPYABLE(G1ConcurrentRefineThread);
 
-#ifndef AARCH64
+#ifdef AARCH64
+  G1ConcurrentRefineThread(G1ConcurrentRefine* cr);
+#else /* AARCH64 */
 protected:
   G1ConcurrentRefineThread(G1ConcurrentRefine* cr, uint worker_id);
-#else /* AARCH64 */
-  G1ConcurrentRefineThread(G1ConcurrentRefine* cr);
 #endif /* AARCH64 */
 
   Monitor* notifier() { return &_notifier; }
@@ -68,41 +68,41 @@ protected:
 
   // Returns !should_terminate().
   // precondition: this is the current thread.
-#ifndef AARCH64
-  virtual bool wait_for_completed_buffers() = 0;
-#else /* AARCH64 */
+#ifdef AARCH64
   bool wait_for_work();
+#else /* AARCH64 */
+  virtual bool wait_for_completed_buffers() = 0;
 #endif /* AARCH64 */
 
   // Deactivate if appropriate.  Returns true if deactivated.
   // precondition: this is the current thread.
-#ifndef AARCH64
+#ifdef AARCH64
+  bool deactivate();
+#else /* AARCH64 */
   virtual bool maybe_deactivate();
 
   // Attempt to do some refinement work.
   // precondition: this is the current thread.
   virtual void do_refinement_step() = 0;
-#else /* AARCH64 */
-  bool deactivate();
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+  // Swap card table and do a complete re-examination/refinement pass over the
+  // refinement table.
+  void do_refinement();
+#else /* AARCH64 */
   // Helper for do_refinement_step implementations.  Try to perform some
   // refinement work, limited by stop_at.  Returns true if any refinement work
   // was performed, false if no work available per stop_at.
   // precondition: this is the current thread.
   bool try_refinement_step(size_t stop_at);
-#else /* AARCH64 */
-  // Swap card table and do a complete re-examination/refinement pass over the
-  // refinement table.
-  void do_refinement();
 #endif /* AARCH64 */
 
   void report_active(const char* reason) const;
-#ifndef AARCH64
-  void report_inactive(const char* reason, const G1ConcurrentRefineStats& stats) const;
-#else /* AARCH64 */
+#ifdef AARCH64
   void report_inactive(const char* reason) const;
+#else /* AARCH64 */
+  void report_inactive(const char* reason, const G1ConcurrentRefineStats& stats) const;
 #endif /* AARCH64 */
 
   G1ConcurrentRefine* cr() const { return _cr; }
@@ -111,20 +111,23 @@ protected:
   void stop_service() override;
 
 public:
-#ifndef AARCH64
+#ifdef AARCH64
+  static G1ConcurrentRefineThread* create(G1ConcurrentRefine* cr);
+#else /* AARCH64 */
   static G1ConcurrentRefineThread* create(G1ConcurrentRefine* cr, uint worker_id);
   virtual ~G1ConcurrentRefineThread() = default;
 
   uint worker_id() const { return _worker_id; }
-#else /* AARCH64 */
-  static G1ConcurrentRefineThread* create(G1ConcurrentRefine* cr);
 #endif /* AARCH64 */
 
   // Activate this thread.
   // precondition: this is not the current thread.
   void activate();
 
-#ifndef AARCH64
+#ifdef AARCH64
+  // Total cpu time spent in this thread so far.
+  jlong cpu_time();
+#else /* AARCH64 */
   G1ConcurrentRefineStats* refinement_stats() {
     return &_refinement_stats;
   }
@@ -135,9 +138,6 @@ public:
 
   // Total virtual time so far.
   double vtime_accum() { return _vtime_accum; }
-#else /* AARCH64 */
-  // Total cpu time spent in this thread so far.
-  jlong cpu_time();
 #endif /* AARCH64 */
 };
 

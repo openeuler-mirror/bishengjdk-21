@@ -776,26 +776,26 @@ void G1YoungCollector::evacuate_next_optional_regions(G1ParScanThreadStateSet* p
 }
 
 void G1YoungCollector::evacuate_optional_collection_set(G1ParScanThreadStateSet* per_thread_states) {
-#ifndef AARCH64
-  const double collection_start_time_ms = phase_times()->cur_collection_start_sec() * 1000.0;
-#else /* AARCH64 */
+#ifdef AARCH64
   const double collection_start_time_ms = policy()->cur_pause_start_sec() * 1000.0;
   const double target_pause_time_ms = G1ForceOptionalEvacuation ? DBL_MAX : MaxGCPauseMillis;
+#else /* AARCH64 */
+  const double collection_start_time_ms = phase_times()->cur_collection_start_sec() * 1000.0;
 #endif /* AARCH64 */
 
   while (!evacuation_failed() && collection_set()->optional_region_length() > 0) {
 
     double time_used_ms = os::elapsedTime() * 1000.0 - collection_start_time_ms;
-#ifndef AARCH64
-    double time_left_ms = MaxGCPauseMillis - time_used_ms;
-#else /* AARCH64 */
+#ifdef AARCH64
     double time_left_ms = target_pause_time_ms - time_used_ms;
+#else /* AARCH64 */
+    double time_left_ms = MaxGCPauseMillis - time_used_ms;
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-    if (time_left_ms < 0 ||
-#else /* AARCH64 */
+#ifdef AARCH64
     if (time_left_ms <= 0 ||
+#else /* AARCH64 */
+    if (time_left_ms < 0 ||
 #endif /* AARCH64 */
         !collection_set()->finalize_optional_for_evacuation(time_left_ms * policy()->optional_evacuation_fraction())) {
       log_trace(gc, ergo, cset)("Skipping evacuation of %u optional regions, no more regions can be evacuated in %.3fms",

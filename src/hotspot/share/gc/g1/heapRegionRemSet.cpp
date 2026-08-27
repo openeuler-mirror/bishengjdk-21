@@ -67,24 +67,24 @@ void HeapRegionRemSet::clear_fcc() {
   G1FromCardCache::clear(_hr->hrm_index());
 }
 
-#ifndef AARCH64
-void HeapRegionRemSet::clear(bool only_cardset) {
-#else /* AARCH64 */
+#ifdef AARCH64
 void HeapRegionRemSet::clear(bool only_cardset, bool keep_tracked) {
+#else /* AARCH64 */
+void HeapRegionRemSet::clear(bool only_cardset) {
 #endif /* AARCH64 */
   if (!only_cardset) {
     _code_roots.clear();
   }
   clear_fcc();
   _card_set.clear();
-#ifndef AARCH64
-  set_state_untracked();
-#else /* AARCH64 */
+#ifdef AARCH64
   if (!keep_tracked) {
     set_state_untracked();
   } else {
     assert(is_tracked(), "must be");
   }
+#else /* AARCH64 */
+  set_state_untracked();
 #endif /* AARCH64 */
   assert(occupied() == 0, "Should be clear.");
 }

@@ -98,11 +98,11 @@ class G1BuildCandidateRegionsTask : public WorkerTask {
     void set(uint idx, HeapRegion* hr) {
       assert(idx < _max_size, "Index %u out of bounds %u", idx, _max_size);
       assert(_data[idx]._r == nullptr, "Value must not have been set.");
-#ifndef AARCH64
-      _data[idx] = CandidateInfo(hr, hr->calc_gc_efficiency());
-#else /* AARCH64 */
+#ifdef AARCH64
       G1Policy* policy = G1CollectedHeap::heap()->policy();
       _data[idx] = CandidateInfo(hr, policy->predict_gc_efficiency(hr));
+#else /* AARCH64 */
+      _data[idx] = CandidateInfo(hr, hr->calc_gc_efficiency());
 #endif /* AARCH64 */
     }
 

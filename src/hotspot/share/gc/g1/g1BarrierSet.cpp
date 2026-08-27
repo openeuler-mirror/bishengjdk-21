@@ -56,11 +56,11 @@
 class G1BarrierSetC1;
 class G1BarrierSetC2;
 
-#ifndef AARCH64
-G1BarrierSet::G1BarrierSet(G1CardTable* card_table) :
-#else /* AARCH64 */
+#ifdef AARCH64
 G1BarrierSet::G1BarrierSet(G1CardTable* card_table,
                            G1CardTable* refinement_table) :
+#else /* AARCH64 */
+G1BarrierSet::G1BarrierSet(G1CardTable* card_table) :
 #endif /* AARCH64 */
   CardTableBarrierSet(make_barrier_set_assembler<G1BarrierSetAssembler>(),
                       make_barrier_set_c1<G1BarrierSetC1>(),
@@ -72,10 +72,10 @@ G1BarrierSet::G1BarrierSet(G1CardTable* card_table,
   _dirty_card_queue_buffer_allocator("DC Buffer Allocator", G1UpdateBufferSize),
 #endif /* ! AARCH64 */
   _satb_mark_queue_set(&_satb_mark_queue_buffer_allocator),
-#ifndef AARCH64
-  _dirty_card_queue_set(&_dirty_card_queue_buffer_allocator)
-#else /* AARCH64 */
+#ifdef AARCH64
   _refinement_table(refinement_table)
+#else /* AARCH64 */
+  _dirty_card_queue_set(&_dirty_card_queue_buffer_allocator)
 #endif /* AARCH64 */
 {}
 
@@ -129,7 +129,45 @@ void G1BarrierSet::write_ref_array_pre(narrowOop* dst, size_t count, bool dest_u
   }
 }
 
-#ifndef AARCH64
+#ifdef AARCH64
+void G1BarrierSet::write_region(JavaThread* thread, MemRegion mr) {
+  if (mr.is_empty()) {
+    return;
+  }
+
+  // Skip writes to young gen.
+  if (G1CollectedHeap::heap()->heap_region_containing(mr.start())->is_young()) {
+    // MemRegion should not span multiple regions for arrays in young gen.
+    DEBUG_ONLY(HeapRegion* containing_hr = G1CollectedHeap::heap()->heap_region_containing(mr.start());)
+    assert(containing_hr->is_young(), "it should be young");
+    assert(containing_hr->is_in(mr.start()), "it should contain start");
+    assert(containing_hr->is_in(mr.last()), "it should also contain last");
+    return;
+  }
+
+  // We need to make sure that we get the start/end byte information for the area
+  // to mark from the same card table to avoid getting confused in the mark loop
+  // further below - we might execute while the global card table is being switched.
+  //
+  // It does not matter which card table we write to: at worst we may write to the
+  // new card table (after the switching), which means that we will catch the
+  // marks next time.
+  // If we write to the old card table (after the switching, then the refinement
+  // table) the oncoming handshake will do the memory synchronization.
+  CardTable* card_table = Atomic::load(&_card_table);
+
+  volatile CardValue* byte = card_table->byte_for(mr.start());
+  CardValue* last_byte = card_table->byte_for(mr.last());
+
+  // Dirty cards only if necessary.
+  for (; byte <= last_byte; byte++) {
+    CardValue bv = *byte;
+    if (bv == G1CardTable::clean_card_val()) {
+      *byte = G1CardTable::dirty_card_val();
+    }
+  }
+}
+#else /* AARCH64 */
 void G1BarrierSet::write_ref_field_post_slow(volatile CardValue* byte) {
   // In the slow path, we know a card is not young
   assert(*byte != G1CardTable::g1_young_card_val(), "slow path invoked without filtering");
@@ -169,44 +207,6 @@ void G1BarrierSet::invalidate(JavaThread* thread, MemRegion mr) {
     if (bv != G1CardTable::dirty_card_val()) {
       *byte = G1CardTable::dirty_card_val();
       qset.enqueue(queue, byte);
-    }
-  }
-}
-#else /* AARCH64 */
-void G1BarrierSet::write_region(JavaThread* thread, MemRegion mr) {
-  if (mr.is_empty()) {
-    return;
-  }
-
-  // Skip writes to young gen.
-  if (G1CollectedHeap::heap()->heap_region_containing(mr.start())->is_young()) {
-    // MemRegion should not span multiple regions for arrays in young gen.
-    DEBUG_ONLY(HeapRegion* containing_hr = G1CollectedHeap::heap()->heap_region_containing(mr.start());)
-    assert(containing_hr->is_young(), "it should be young");
-    assert(containing_hr->is_in(mr.start()), "it should contain start");
-    assert(containing_hr->is_in(mr.last()), "it should also contain last");
-    return;
-  }
-
-  // We need to make sure that we get the start/end byte information for the area
-  // to mark from the same card table to avoid getting confused in the mark loop
-  // further below - we might execute while the global card table is being switched.
-  //
-  // It does not matter which card table we write to: at worst we may write to the
-  // new card table (after the switching), which means that we will catch the
-  // marks next time.
-  // If we write to the old card table (after the switching, then the refinement
-  // table) the oncoming handshake will do the memory synchronization.
-  CardTable* card_table = Atomic::load(&_card_table);
-
-  volatile CardValue* byte = card_table->byte_for(mr.start());
-  CardValue* last_byte = card_table->byte_for(mr.last());
-
-  // Dirty cards only if necessary.
-  for (; byte <= last_byte; byte++) {
-    CardValue bv = *byte;
-    if (bv == G1CardTable::clean_card_val()) {
-      *byte = G1CardTable::dirty_card_val();
     }
   }
 }

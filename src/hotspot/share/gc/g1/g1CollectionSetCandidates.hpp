@@ -139,17 +139,17 @@ public:
 // Iterator for G1CollectionSetCandidates.
 class G1CollectionSetCandidatesIterator : public StackObj {
   G1CollectionSetCandidates* _which;
-#ifndef AARCH64
-  uint _marking_position;
-#else /* AARCH64 */
+#ifdef AARCH64
   uint _position;
+#else /* AARCH64 */
+  uint _marking_position;
 #endif /* AARCH64 */
 
 public:
-#ifndef AARCH64
-  G1CollectionSetCandidatesIterator(G1CollectionSetCandidates* which, uint marking_position);
-#else /* AARCH64 */
+#ifdef AARCH64
   G1CollectionSetCandidatesIterator(G1CollectionSetCandidates* which, uint position);
+#else /* AARCH64 */
+  G1CollectionSetCandidatesIterator(G1CollectionSetCandidates* which, uint marking_position);
 #endif /* AARCH64 */
 
   G1CollectionSetCandidatesIterator& operator++();
@@ -250,10 +250,10 @@ private:
 public:
   void verify() PRODUCT_RETURN;
 
-#ifndef AARCH64
-  uint length() const { return marking_regions_length(); }
-#else /* AARCH64 */
+#ifdef AARCH64
   uint length() const { return marking_regions_length() + retained_regions_length(); }
+#else /* AARCH64 */
+  uint length() const { return marking_regions_length(); }
 #endif /* AARCH64 */
 
   // Iteration
@@ -262,10 +262,10 @@ public:
   }
 
   G1CollectionSetCandidatesIterator end() {
-#ifndef AARCH64
-    return G1CollectionSetCandidatesIterator(this, marking_regions_length());
-#else /* AARCH64 */
+#ifdef AARCH64
     return G1CollectionSetCandidatesIterator(this, length());
+#else /* AARCH64 */
+    return G1CollectionSetCandidatesIterator(this, marking_regions_length());
 #endif /* AARCH64 */
   }
 };

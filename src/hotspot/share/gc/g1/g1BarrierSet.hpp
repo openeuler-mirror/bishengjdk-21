@@ -60,37 +60,37 @@ class G1BarrierSet: public CardTableBarrierSet {
   BufferNode::Allocator _dirty_card_queue_buffer_allocator;
 #endif /* ! AARCH64 */
   G1SATBMarkQueueSet _satb_mark_queue_set;
-#ifndef AARCH64
-  G1DirtyCardQueueSet _dirty_card_queue_set;
-#else /* AARCH64 */
+#ifdef AARCH64
 
   G1CardTable* _refinement_table;
 
  public:
   G1BarrierSet(G1CardTable* card_table, G1CardTable* refinement_table);
   virtual ~G1BarrierSet();
+#else /* AARCH64 */
+  G1DirtyCardQueueSet _dirty_card_queue_set;
 #endif /* AARCH64 */
 
   static G1BarrierSet* g1_barrier_set() {
     return barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
   }
 
-#ifndef AARCH64
-  void invalidate(JavaThread* thread, MemRegion mr);
-#else /* AARCH64 */
+#ifdef AARCH64
   G1CardTable* refinement_table() const { return _refinement_table; }
+#else /* AARCH64 */
+  void invalidate(JavaThread* thread, MemRegion mr);
 #endif /* AARCH64 */
 
-#ifndef AARCH64
- public:
-  G1BarrierSet(G1CardTable* table);
-  ~G1BarrierSet() { }
-#else /* AARCH64 */
+#ifdef AARCH64
   // Swap the global card table references, without synchronization.
   void swap_global_card_table();
 
   // Update the given thread's card table (byte map) base to the current card table's.
   void update_card_table_base(Thread* thread);
+#else /* AARCH64 */
+ public:
+  G1BarrierSet(G1CardTable* table);
+  ~G1BarrierSet() { }
 #endif /* AARCH64 */
 
   virtual bool card_mark_must_follow_store() const {
@@ -112,20 +112,20 @@ class G1BarrierSet: public CardTableBarrierSet {
   template <DecoratorSet decorators, typename T>
   void write_ref_field_pre(T* field);
 
-#ifndef AARCH64
+#ifdef AARCH64
+  inline void write_region(MemRegion mr);
+  void write_region(JavaThread* thread, MemRegion mr);
+#else /* AARCH64 */
   inline void invalidate(MemRegion mr);
   inline void write_region(JavaThread* thread, MemRegion mr);
 
   inline void write_ref_array_work(MemRegion mr);
-#else /* AARCH64 */
-  inline void write_region(MemRegion mr);
-  void write_region(JavaThread* thread, MemRegion mr);
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  template <DecoratorSet decorators, typename T>
-#else /* AARCH64 */
+#ifdef AARCH64
   template <DecoratorSet decorators = DECORATORS_NONE, typename T>
+#else /* AARCH64 */
+  template <DecoratorSet decorators, typename T>
 #endif /* AARCH64 */
   void write_ref_field_post(T* field);
 #ifndef AARCH64
@@ -141,12 +141,12 @@ class G1BarrierSet: public CardTableBarrierSet {
     return g1_barrier_set()->_satb_mark_queue_set;
   }
 
-#ifndef AARCH64
+#ifdef AARCH64
+  virtual void print_on(outputStream* st) const;
+#else /* AARCH64 */
   static G1DirtyCardQueueSet& dirty_card_queue_set() {
     return g1_barrier_set()->_dirty_card_queue_set;
   }
-#else /* AARCH64 */
-  virtual void print_on(outputStream* st) const;
 #endif /* AARCH64 */
 
   // Callbacks for runtime accesses.

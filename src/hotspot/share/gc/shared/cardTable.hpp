@@ -209,20 +209,20 @@ public:
 
   virtual bool is_in_young(const void* p) const = 0;
 
-#ifndef AARCH64
-  // Print a description of the memory for the card table
-  virtual void print_on(outputStream* st) const;
-#else /* AARCH64 */
+#ifdef AARCH64
   // Print card table information.
   void print_on(outputStream* st, const char* description = "Card") const;
+#else /* AARCH64 */
+  // Print a description of the memory for the card table
+  virtual void print_on(outputStream* st) const;
 #endif /* AARCH64 */
 
   // val_equals -> it will check that all cards covered by mr equal val
   // !val_equals -> it will check that all cards covered by mr do not equal val
-#ifndef AARCH64
-  void verify_region(MemRegion mr, CardValue val, bool val_equals) PRODUCT_RETURN;
-#else /* AARCH64 */
+#ifdef AARCH64
   virtual void verify_region(MemRegion mr, CardValue val, bool val_equals) PRODUCT_RETURN;
+#else /* AARCH64 */
+  void verify_region(MemRegion mr, CardValue val, bool val_equals) PRODUCT_RETURN;
 #endif /* AARCH64 */
   void verify_not_dirty_region(MemRegion mr) PRODUCT_RETURN;
   void verify_dirty_region(MemRegion mr) PRODUCT_RETURN;

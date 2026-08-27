@@ -274,10 +274,10 @@ void G1Arguments::initialize() {
   uint max_parallel_refinement_threads = G1ConcRefinementThreads + G1DirtyCardQueueSet::num_par_ids();
 #endif /* ! AARCH64 */
   uint const divisor = 3;  // Safe divisor; we increment by 2 for each claim, but there is a small initial value.
-#ifndef AARCH64
-  if (max_parallel_refinement_threads > UINT_MAX / divisor) {
-#else /* AARCH64 */
+#ifdef AARCH64
   if (G1ConcRefinementThreads > UINT_MAX / divisor) {
+#else /* AARCH64 */
+  if (max_parallel_refinement_threads > UINT_MAX / divisor) {
 #endif /* AARCH64 */
     vm_exit_during_initialization("Too large parallelism for remembered sets.");
   }

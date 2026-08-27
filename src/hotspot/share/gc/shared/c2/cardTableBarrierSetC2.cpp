@@ -125,7 +125,11 @@ void CardTableBarrierSetC2::post_barrier(GraphKit* kit,
   kit->final_sync(ideal);
 }
 
-#ifndef AARCH64
+#ifdef AARCH64
+bool CardTableBarrierSetC2::use_ReduceInitialCardMarks() {
+  return ReduceInitialCardMarks;
+}
+#else /* AARCH64 */
 void CardTableBarrierSetC2::clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const {
   BarrierSetC2::clone(kit, src, dst, size, is_array);
   const TypePtr* raw_adr_type = TypeRawPtr::BOTTOM;
@@ -152,10 +156,6 @@ void CardTableBarrierSetC2::clone(GraphKit* kit, Node* src, Node* dst, Node* siz
 }
 
 bool CardTableBarrierSetC2::use_ReduceInitialCardMarks() const {
-  return ReduceInitialCardMarks;
-}
-#else /* AARCH64 */
-bool CardTableBarrierSetC2::use_ReduceInitialCardMarks() {
   return ReduceInitialCardMarks;
 }
 #endif /* AARCH64 */

@@ -493,21 +493,21 @@ public:
   // Callers must ensure this is not called by multiple threads at the same time.
   void hr_clear(bool clear_space);
   // Clear the card table corresponding to this region.
-#ifndef AARCH64
-  void clear_cardtable();
-#else /* AARCH64 */
+#ifdef AARCH64
   void clear_card_table();
   void clear_refinement_table();
 
   void clear_both_card_tables();
+#else /* AARCH64 */
+  void clear_cardtable();
 #endif /* AARCH64 */
 
   // Notify the region that an evacuation failure occurred for an object within this
   // region.
-#ifndef AARCH64
-  void note_evacuation_failure(bool during_concurrent_start);
-#else /* AARCH64 */
+#ifdef AARCH64
   void note_evacuation_failure();
+#else /* AARCH64 */
+  void note_evacuation_failure(bool during_concurrent_start);
 #endif /* AARCH64 */
 
   // Notify the region that we have partially finished processing self-forwarded
@@ -554,10 +554,10 @@ public:
   }
 
   // Update the region state after a failed evacuation.
-#ifndef AARCH64
-  void handle_evacuation_failure();
-#else /* AARCH64 */
+#ifdef AARCH64
   void handle_evacuation_failure(bool retain);
+#else /* AARCH64 */
+  void handle_evacuation_failure();
 #endif /* AARCH64 */
 
   // Iterate over the objects overlapping the given memory region, applying cl

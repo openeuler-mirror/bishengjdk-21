@@ -30,10 +30,10 @@
 #include "utilities/macros.hpp"
 
 static G1BarrierSet* current_g1_barrier_set() {
-#ifndef AARCH64
-  return barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
-#else /* AARCH64 */
+#ifdef AARCH64
   return G1BarrierSet::g1_barrier_set();
+#else /* AARCH64 */
+  return barrier_set_cast<G1BarrierSet>(BarrierSet::barrier_set());
 #endif /* AARCH64 */
 }
 

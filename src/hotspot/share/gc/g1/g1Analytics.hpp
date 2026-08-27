@@ -48,15 +48,15 @@ class G1Analytics: public CHeapObj<mtGC> {
 
   TruncatedSeq _concurrent_refine_rate_ms_seq;
   TruncatedSeq _dirtied_cards_rate_ms_seq;
-#ifndef AARCH64
+#ifdef AARCH64
+  // The ratio between the number of merged cards to actually scanned cards for
+  // card based remembered sets, for young-only and mixed gcs.
+  G1PhaseDependentSeq _card_merge_to_scan_ratio_seq;
+#else /* AARCH64 */
   TruncatedSeq _dirtied_cards_in_thread_buffers_seq;
   // The ratio between the number of scanned cards and actually merged cards, for
   // young-only and mixed gcs.
   G1PhaseDependentSeq _card_scan_to_merge_ratio_seq;
-#else /* AARCH64 */
-  // The ratio between the number of merged cards to actually scanned cards for
-  // card based remembered sets, for young-only and mixed gcs.
-  G1PhaseDependentSeq _card_merge_to_scan_ratio_seq;
 #endif /* AARCH64 */
 
   // The cost to scan a card during young-only and mixed gcs in ms.
@@ -72,11 +72,11 @@ class G1Analytics: public CHeapObj<mtGC> {
   G1PhaseDependentSeq _cost_per_byte_copied_ms_seq;
 
   G1PhaseDependentSeq _pending_cards_seq;
-#ifndef AARCH64
-  G1PhaseDependentSeq _rs_length_seq;
-#else /* AARCH64 */
+#ifdef AARCH64
   G1PhaseDependentSeq _card_rs_length_seq;
   G1PhaseDependentSeq _code_root_rs_length_seq;
+#else /* AARCH64 */
+  G1PhaseDependentSeq _rs_length_seq;
 #endif /* AARCH64 */
 
 #ifdef AARCH64
@@ -149,12 +149,12 @@ public:
 #endif /* ! AARCH64 */
   void report_cost_per_card_scan_ms(double cost_per_remset_card_ms, bool for_young_only_phase);
   void report_cost_per_card_merge_ms(double cost_per_card_ms, bool for_young_only_phase);
-#ifndef AARCH64
-  void report_card_scan_to_merge_ratio(double cards_per_entry_ratio, bool for_young_only_phase);
-  void report_rs_length_diff(double rs_length_diff, bool for_young_only_phase);
-#else /* AARCH64 */
+#ifdef AARCH64
   void report_cost_per_code_root_scan_ms(double cost_per_code_root_ms, bool for_young_only_phase);
   void report_card_merge_to_scan_ratio(double merge_to_scan_ratio, bool for_young_only_phase);
+#else /* AARCH64 */
+  void report_card_scan_to_merge_ratio(double cards_per_entry_ratio, bool for_young_only_phase);
+  void report_rs_length_diff(double rs_length_diff, bool for_young_only_phase);
 #endif /* AARCH64 */
   void report_cost_per_byte_ms(double cost_per_byte_ms, bool for_young_only_phase);
   void report_young_other_cost_per_region_ms(double other_cost_per_region_ms);
@@ -164,11 +164,11 @@ public:
 #endif /* AARCH64 */
   void report_constant_other_time_ms(double constant_other_time_ms);
   void report_pending_cards(double pending_cards, bool for_young_only_phase);
-#ifndef AARCH64
-  void report_rs_length(double rs_length, bool for_young_only_phase);
-#else /* AARCH64 */
+#ifdef AARCH64
   void report_card_rs_length(double card_rs_length, bool for_young_only_phase);
   void report_code_root_rs_length(double code_root_rs_length, bool for_young_only_phase);
+#else /* AARCH64 */
+  void report_rs_length(double rs_length, bool for_young_only_phase);
 #endif /* AARCH64 */
 
   double predict_alloc_rate_ms() const;
@@ -182,10 +182,10 @@ public:
 
   // Predict how many of the given remembered set of length rs_length will add to
   // the number of total cards scanned.
-#ifndef AARCH64
-  size_t predict_scan_card_num(size_t rs_length, bool for_young_only_phase) const;
-#else /* AARCH64 */
+#ifdef AARCH64
   size_t predict_scan_card_num(size_t card_rs_length, bool for_young_only_phase) const;
+#else /* AARCH64 */
+  size_t predict_scan_card_num(size_t rs_length, bool for_young_only_phase) const;
 #endif /* AARCH64 */
 
   double predict_card_merge_time_ms(size_t card_num, bool for_young_only_phase) const;
@@ -209,11 +209,11 @@ public:
 
   double predict_cleanup_time_ms() const;
 
-#ifndef AARCH64
-  size_t predict_rs_length(bool for_young_only_phase) const;
-#else /* AARCH64 */
+#ifdef AARCH64
   size_t predict_card_rs_length(bool for_young_only_phase) const;
   size_t predict_code_root_rs_length(bool for_young_only_phase) const;
+#else /* AARCH64 */
+  size_t predict_rs_length(bool for_young_only_phase) const;
 #endif /* AARCH64 */
   size_t predict_pending_cards(bool for_young_only_phase) const;
 

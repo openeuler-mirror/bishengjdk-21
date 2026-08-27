@@ -83,10 +83,10 @@ void G1FromCardCache::print(outputStream* out) {
 #endif
 
 uint G1FromCardCache::num_par_rem_sets() {
-#ifndef AARCH64
-  return G1DirtyCardQueueSet::num_par_ids() + G1ConcurrentRefine::max_num_threads() + MAX2(ConcGCThreads, ParallelGCThreads);
-#else /* AARCH64 */
+#ifdef AARCH64
   return G1ConcRefinementThreads + ConcGCThreads;
+#else /* AARCH64 */
+  return G1DirtyCardQueueSet::num_par_ids() + G1ConcurrentRefine::max_num_threads() + MAX2(ConcGCThreads, ParallelGCThreads);
 #endif /* AARCH64 */
 }
 

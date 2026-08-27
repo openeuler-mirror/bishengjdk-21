@@ -227,9 +227,7 @@ void G1CollectionSetCandidates::add_retained_region_unsorted(HeapRegion* r) {
 
 #endif /* AARCH64 */
 void G1CollectionSetCandidates::remove(G1CollectionCandidateRegionList* other) {
-#ifndef AARCH64
-  _marking_regions.remove(other);
-#else /* AARCH64 */
+#ifdef AARCH64
   // During removal, we exploit the fact that elements in the marking_regions,
   // retained_regions and other list are sorted by gc_efficiency. Furthermore,
   // all regions in the passed other list are in one of the two other lists.
@@ -249,6 +247,8 @@ void G1CollectionSetCandidates::remove(G1CollectionCandidateRegionList* other) {
 
   _marking_regions.remove(&other_marking_regions);
   _retained_regions.remove(&other_retained_regions);
+#else /* AARCH64 */
+  _marking_regions.remove(other);
 #endif /* AARCH64 */
 
   for (HeapRegion* r : *other) {

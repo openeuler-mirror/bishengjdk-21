@@ -289,13 +289,13 @@ void CardTable::verify_dirty_region(MemRegion mr) {
 }
 #endif
 
-#ifndef AARCH64
-void CardTable::print_on(outputStream* st) const {
-  st->print_cr("Card table byte_map: [" PTR_FORMAT "," PTR_FORMAT "] _byte_map_base: " PTR_FORMAT,
-#else /* AARCH64 */
+#ifdef AARCH64
 void CardTable::print_on(outputStream* st, const char* description) const {
   st->print_cr("%s table byte_map: [" PTR_FORMAT "," PTR_FORMAT "] _byte_map_base: " PTR_FORMAT,
                description,
+#else /* AARCH64 */
+void CardTable::print_on(outputStream* st) const {
+  st->print_cr("Card table byte_map: [" PTR_FORMAT "," PTR_FORMAT "] _byte_map_base: " PTR_FORMAT,
 #endif /* AARCH64 */
                p2i(_byte_map), p2i(_byte_map + _byte_map_size), p2i(_byte_map_base));
 }

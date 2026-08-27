@@ -73,13 +73,13 @@ class G1ParScanThreadState : public CHeapObj<mtGC> {
 
   uint _worker_id;
 
-#ifndef AARCH64
+#ifdef AARCH64
+  size_t _num_cards_marked_dirty;
+  size_t _num_cards_marked_to_cset;
+#else /* AARCH64 */
   // Remember the last enqueued card to avoid enqueuing the same card over and over;
   // since we only ever scan a card once, this is sufficient.
   size_t _last_enqueued_card;
-#else /* AARCH64 */
-  size_t _num_cards_marked_dirty;
-  size_t _num_cards_marked_to_cset;
 #endif /* AARCH64 */
 
   // Upper and lower threshold to start and end work queue draining.
@@ -170,10 +170,10 @@ public:
   // Record the card if the reference's target region's remembered set is tracked.
   // Assumes that a significant amount of pre-filtering (like done by
   // write_ref_field_post() above) has already been performed.
-#ifndef AARCH64
-  template <class T> void enqueue_card_if_tracked(G1HeapRegionAttr region_attr, T* p, oop o);
-#else /* AARCH64 */
+#ifdef AARCH64
   template <class T> void mark_card_if_tracked(G1HeapRegionAttr region_attr, T* p, oop o);
+#else /* AARCH64 */
+  template <class T> void enqueue_card_if_tracked(G1HeapRegionAttr region_attr, T* p, oop o);
 #endif /* AARCH64 */
 
   G1EvacuationRootClosures* closures() { return _closures; }
