@@ -75,9 +75,7 @@ public:
     // 00000010 - dirty, contains reference to collection set (AArch64)
     // 00000000 - dirty, needs to be scanned.
     //
-#ifndef AARCH64
-    g1_card_already_scanned = 0x1
-#else /* AARCH64 */
+#ifdef AARCH64
     // g1_to_cset_card and g1_from_remset_card are both used for optimization and
     // needed for more accurate prediction of card generation rate.
     //
@@ -102,6 +100,8 @@ public:
     g1_card_already_scanned = 0x1,
     g1_to_cset_card = 0x2,
     g1_from_remset_card = 0x4
+#else /* AARCH64 */
+    g1_card_already_scanned = 0x1
 #endif /* AARCH64 */
   };
 
@@ -123,11 +123,11 @@ public:
 #endif /* ! AARCH64 */
   static CardValue g1_scanned_card_val() { return g1_card_already_scanned; }
 
-#ifndef AARCH64
+#ifdef AARCH64
+  void verify_region(MemRegion mr, CardValue val, bool val_equals) override;
+#else /* AARCH64 */
   void verify_g1_young_region(MemRegion mr) PRODUCT_RETURN;
   void g1_mark_as_young(const MemRegion& mr);
-#else /* AARCH64 */
-  void verify_region(MemRegion mr, CardValue val, bool val_equals) override;
 #endif /* AARCH64 */
 
   size_t index_for_cardvalue(CardValue const* p) const {
@@ -138,20 +138,17 @@ public:
   // Clean. Returns whether the card was Clean before this operation. This result
   // may be inaccurate as it does not
   // perform the dirtying atomically.
-#ifndef AARCH64
+#ifdef AARCH64
+  inline bool mark_clean_as_from_remset(CardValue* card);
+#else /* AARCH64 */
   inline bool mark_clean_as_dirty(CardValue* card);
 
   // Change Clean cards in a (large) area on the card table as Dirty, preserving
   // already scanned cards. Assumes that most cards in that area are Clean.
   inline void mark_range_dirty(size_t start_card_index, size_t num_cards);
-#else /* AARCH64 */
-  inline bool mark_clean_as_from_remset(CardValue* card);
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  // Change the given range of dirty cards to "which". All of these cards must be Dirty.
-  inline void change_dirty_cards_to(CardValue* start_card, CardValue* end_card, CardValue which);
-#else /* AARCH64 */
+#ifdef AARCH64
   // Change Clean cards in a (large) area on the card table as From_Remset, preserving
   // cards already marked otherwise. Assumes that most cards in that area are Clean.
   // Not atomic.
@@ -160,6 +157,9 @@ public:
   // Change the given range of dirty cards to "which". All of these cards must be non-clean.
   // Returns the number of pending cards found.
   inline size_t change_dirty_cards_to(CardValue* start_card, CardValue* end_card, CardValue which);
+#else /* AARCH64 */
+  // Change the given range of dirty cards to "which". All of these cards must be Dirty.
+  inline void change_dirty_cards_to(CardValue* start_card, CardValue* end_card, CardValue which);
 #endif /* AARCH64 */
 
   inline uint region_idx_for(CardValue* p);

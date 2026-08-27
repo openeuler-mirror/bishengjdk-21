@@ -52,10 +52,10 @@ class G1CollectionCandidateRegionList;
 #endif /* AARCH64 */
 class G1CollectionSetCandidates;
 class G1CollectionSetChooser;
-#ifndef AARCH64
-class G1CollectionCandidateRegionList;
-#else /* AARCH64 */
+#ifdef AARCH64
 class G1ConcurrentRefineStats;
+#else /* AARCH64 */
+class G1CollectionCandidateRegionList;
 #endif /* AARCH64 */
 class G1IHOPControl;
 class G1Analytics;
@@ -113,11 +113,7 @@ class G1Policy: public CHeapObj<mtGC> {
 
   uint _free_regions_at_end_of_collection;
 
-#ifndef AARCH64
-  size_t _rs_length;
-
-  size_t _pending_cards_at_gc_start;
-#else /* AARCH64 */
+#ifdef AARCH64
   // Tracks the number of cards marked as dirty (only) during garbage collection
   // (evacuation) on the card table.
   // This is needed to properly account for those cards in the heuristics to start
@@ -130,6 +126,10 @@ class G1Policy: public CHeapObj<mtGC> {
   // Tracks the approximate number of cards found as to-collection-set by either the
   // garbage collection or the most recent refinement sweep.
   size_t _to_collection_set_cards;
+#else /* AARCH64 */
+  size_t _rs_length;
+
+  size_t _pending_cards_at_gc_start;
 #endif /* AARCH64 */
 
   G1ConcurrentStartToMixedTimeTracker _concurrent_start_to_mixed;
@@ -138,10 +138,10 @@ class G1Policy: public CHeapObj<mtGC> {
     return collector_state()->in_young_only_phase() && !collector_state()->mark_or_rebuild_in_progress();
   }
 
-#ifndef AARCH64
-  double logged_cards_processing_time() const;
-#else /* AARCH64 */
+#ifdef AARCH64
   double pending_cards_processing_time() const;
+#else /* AARCH64 */
+  double logged_cards_processing_time() const;
 #endif /* AARCH64 */
 public:
   const G1Predictions& predictor() const { return _predictor; }
@@ -161,20 +161,20 @@ public:
     hr->install_surv_rate_group(_survivor_surv_rate_group);
   }
 
-#ifndef AARCH64
-  void record_rs_length(size_t rs_length) {
-    _rs_length = rs_length;
-  }
-#else /* AARCH64 */
+#ifdef AARCH64
   double cur_pause_start_sec() const {
     return _cur_pause_start_sec;
   }
+#else /* AARCH64 */
+  void record_rs_length(size_t rs_length) {
+    _rs_length = rs_length;
+  }
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  double predict_base_time_ms(size_t pending_cards) const;
-#else /* AARCH64 */
+#ifdef AARCH64
   double predict_base_time_ms(size_t pending_cards, size_t card_rs_length) const;
+#else /* AARCH64 */
+  double predict_base_time_ms(size_t pending_cards) const;
 #endif /* AARCH64 */
 
 #ifndef AARCH64
@@ -183,10 +183,10 @@ private:
   // Base time contains handling remembered sets and constant other time of the
   // whole young gen, refinement buffers, and copying survivors.
   // Basically everything but copying eden regions.
-#ifndef AARCH64
-  double predict_base_time_ms(size_t pending_cards, size_t rs_length) const;
-#else /* AARCH64 */
+#ifdef AARCH64
   double predict_base_time_ms(size_t pending_cards, size_t card_rs_length, size_t code_root_length) const;
+#else /* AARCH64 */
+  double predict_base_time_ms(size_t pending_cards, size_t rs_length) const;
 #endif /* AARCH64 */
 
   // Copy time for a region is copying live data.
@@ -267,10 +267,10 @@ private:
   // predicts pending cards and RS length; AArch64 also predicts card-set and
   // code-root remembered-set lengths.
   void update_young_length_bounds();
-#ifndef AARCH64
-  void update_young_length_bounds(size_t pending_cards, size_t rs_length);
-#else /* AARCH64 */
+#ifdef AARCH64
   void update_young_length_bounds(size_t pending_cards, size_t card_rs_length, size_t code_root_rs_length);
+#else /* AARCH64 */
+  void update_young_length_bounds(size_t pending_cards, size_t rs_length);
 #endif /* AARCH64 */
 
   // Calculate and return the minimum desired eden length based on the MMU target.
@@ -299,10 +299,10 @@ private:
 
   // Calculate desired young length based on current situation without taking actually
   // available free regions into account.
-#ifndef AARCH64
-  uint calculate_young_desired_length(size_t pending_cards, size_t rs_length) const;
-#else /* AARCH64 */
+#ifdef AARCH64
   uint calculate_young_desired_length(size_t pending_cards, size_t card_rs_length, size_t code_root_rs_length) const;
+#else /* AARCH64 */
+  uint calculate_young_desired_length(size_t pending_cards, size_t rs_length) const;
 #endif /* AARCH64 */
   // Limit the given desired young length to available free regions.
   uint calculate_young_target_length(uint desired_young_length) const;
@@ -327,15 +327,15 @@ private:
                         uint base_free_regions, double target_pause_time_ms) const;
 
 public:
-#ifndef AARCH64
-  size_t pending_cards_at_gc_start() const { return _pending_cards_at_gc_start; }
-#else /* AARCH64 */
+#ifdef AARCH64
   size_t predict_bytes_to_copy(HeapRegion* hr) const;
 
   double last_mutator_dirty_start_time_ms();
   size_t pending_cards_from_gc() const { return _pending_cards_from_gc; }
 
   size_t current_pending_cards();
+#else /* AARCH64 */
+  size_t pending_cards_at_gc_start() const { return _pending_cards_at_gc_start; }
 #endif /* AARCH64 */
 
 #ifdef AARCH64
@@ -397,10 +397,10 @@ public:
   // Check the current value of the young list RSet length and
   // compare it against the last prediction. If the current value is
   // higher, recalculate the young list target length prediction.
-#ifndef AARCH64
-  void revise_young_list_target_length(size_t rs_length);
-#else /* AARCH64 */
+#ifdef AARCH64
   void revise_young_list_target_length(size_t pending_cards, size_t card_rs_length, size_t code_root_rs_length);
+#else /* AARCH64 */
+  void revise_young_list_target_length(size_t rs_length);
 #endif /* AARCH64 */
 
   // This should be called after the heap is resized.
@@ -522,13 +522,7 @@ public:
 #endif /* AARCH64 */
   void transfer_survivors_to_cset(const G1SurvivorRegions* survivors);
 
-#ifndef AARCH64
-  // Record and log stats and pending cards before not-full collection.
-  // thread_buffer_cards is the number of cards that were in per-thread
-  // buffers.  pending_cards includes thread_buffer_cards.
-  void record_concurrent_refinement_stats(size_t pending_cards,
-                                          size_t thread_buffer_cards);
-#else /* AARCH64 */
+#ifdef AARCH64
   // Record and log stats and pending cards to update predictors.
   void record_refinement_stats(G1ConcurrentRefineStats* stats);
 
@@ -543,6 +537,12 @@ public:
     return should_retain_evac_failed_region(r->hrm_index());
   }
   bool should_retain_evac_failed_region(uint index) const;
+#else /* AARCH64 */
+  // Record and log stats and pending cards before not-full collection.
+  // thread_buffer_cards is the number of cards that were in per-thread
+  // buffers.  pending_cards includes thread_buffer_cards.
+  void record_concurrent_refinement_stats(size_t pending_cards,
+                                          size_t thread_buffer_cards);
 #endif /* AARCH64 */
 
 private:

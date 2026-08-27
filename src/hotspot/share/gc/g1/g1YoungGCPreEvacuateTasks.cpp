@@ -26,10 +26,10 @@
 
 #include "gc/g1/g1CollectedHeap.inline.hpp"
 #include "gc/g1/g1ConcurrentRefineStats.hpp"
-#ifndef AARCH64
-#include "gc/g1/g1DirtyCardQueue.hpp"
-#else /* AARCH64 */
+#ifdef AARCH64
 #include "gc/g1/g1ThreadLocalData.hpp"
+#else /* AARCH64 */
+#include "gc/g1/g1DirtyCardQueue.hpp"
 #endif /* AARCH64 */
 #include "gc/g1/g1YoungGCPreEvacuateTasks.hpp"
 #include "gc/shared/barrierSet.inline.hpp"
@@ -59,10 +59,10 @@ class G1PreEvacuateCollectionSetBatchTask::JavaThreadRetireTask : public G1Abstr
     G1ConcurrentRefineStats _refinement_stats;
 #endif /* ! AARCH64 */
 
-#ifndef AARCH64
-    RetireTLABClosure() : _tlab_stats(), _refinement_stats() { }
-#else /* AARCH64 */
+#ifdef AARCH64
     RetireTLABClosure() : _tlab_stats() { }
+#else /* AARCH64 */
+    RetireTLABClosure() : _tlab_stats(), _refinement_stats() { }
 #endif /* AARCH64 */
 
     void do_thread(Thread* thread) override {
@@ -80,12 +80,12 @@ class G1PreEvacuateCollectionSetBatchTask::JavaThreadRetireTask : public G1Abstr
   };
 
 public:
-#ifndef AARCH64
-  JavaThreadRetireTask() :
-    G1AbstractSubTask(G1GCPhaseTimes::RetireTLABsAndFlushLogs),
-#else /* AARCH64 */
+#ifdef AARCH64
   JavaThreadRetireTask() :
     G1AbstractSubTask(G1GCPhaseTimes::RetireTLABs),
+#else /* AARCH64 */
+  JavaThreadRetireTask() :
+    G1AbstractSubTask(G1GCPhaseTimes::RetireTLABsAndFlushLogs),
 #endif /* AARCH64 */
     _claimer(ThreadsPerWorker),
     _local_tlab_stats(nullptr),
@@ -181,15 +181,15 @@ public:
 
 G1PreEvacuateCollectionSetBatchTask::G1PreEvacuateCollectionSetBatchTask() :
   G1BatchedTask("Pre Evacuate Prepare", G1CollectedHeap::heap()->phase_times()),
-#ifndef AARCH64
+#ifdef AARCH64
+  _java_retire_task(new JavaThreadRetireTask()) {
+#else /* AARCH64 */
   _old_pending_cards(G1BarrierSet::dirty_card_queue_set().num_cards()),
   _java_retire_task(new JavaThreadRetireTask()),
   _non_java_retire_task(new NonJavaThreadFlushLogs()) {
 
   // Disable mutator refinement until concurrent refinement decides otherwise.
   G1BarrierSet::dirty_card_queue_set().set_mutator_refinement_threshold(SIZE_MAX);
-#else /* AARCH64 */
-  _java_retire_task(new JavaThreadRetireTask()) {
 #endif /* AARCH64 */
 
 #ifndef AARCH64

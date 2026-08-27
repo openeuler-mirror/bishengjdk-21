@@ -194,10 +194,10 @@ G1RemoveSelfForwardsTask::G1RemoveSelfForwardsTask(G1EvacFailureRegions* evac_fa
   _chunk_bitmap(mtGC) {
 
   _num_evac_fail_regions = _evac_failure_regions->num_regions_failed_evacuation();
-#ifndef AARCH64
-  _num_chunks_per_region = G1CollectedHeap::get_chunks_per_region();
-#else /* AARCH64 */
+#ifdef AARCH64
   _num_chunks_per_region = G1CollectedHeap::get_chunks_per_region_for_scan();
+#else /* AARCH64 */
+  _num_chunks_per_region = G1CollectedHeap::get_chunks_per_region();
 #endif /* AARCH64 */
 
   _chunk_size = static_cast<uint>(HeapRegion::GrainWords / _num_chunks_per_region);

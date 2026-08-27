@@ -56,43 +56,43 @@ class WorkerThreads;
 // iterate over them.
 class G1ConcurrentRefineThreadControl {
   G1ConcurrentRefine* _cr;
-#ifndef AARCH64
-  G1ConcurrentRefineThread** _threads;
-#else /* AARCH64 */
+#ifdef AARCH64
   G1ConcurrentRefineThread* _control_thread;
 
   WorkerThreads* _workers;
+#else /* AARCH64 */
+  G1ConcurrentRefineThread** _threads;
 #endif /* AARCH64 */
   uint _max_num_threads;
 
   // Create the refinement thread for the given worker id.
   // If initializing is true, ignore InjectGCWorkerCreationFailure.
-#ifndef AARCH64
-  G1ConcurrentRefineThread* create_refinement_thread(uint worker_id, bool initializing);
-#else /* AARCH64 */
+#ifdef AARCH64
   G1ConcurrentRefineThread* create_refinement_thread();
+#else /* AARCH64 */
+  G1ConcurrentRefineThread* create_refinement_thread(uint worker_id, bool initializing);
 #endif /* AARCH64 */
 
   NONCOPYABLE(G1ConcurrentRefineThreadControl);
 
 public:
-#ifndef AARCH64
-  G1ConcurrentRefineThreadControl();
-#else /* AARCH64 */
+#ifdef AARCH64
   G1ConcurrentRefineThreadControl(uint max_num_threads);
+#else /* AARCH64 */
+  G1ConcurrentRefineThreadControl();
 #endif /* AARCH64 */
   ~G1ConcurrentRefineThreadControl();
 
-#ifndef AARCH64
-  jint initialize(G1ConcurrentRefine* cr, uint max_num_threads);
-#else /* AARCH64 */
+#ifdef AARCH64
   jint initialize(G1ConcurrentRefine* cr);
+#else /* AARCH64 */
+  jint initialize(G1ConcurrentRefine* cr, uint max_num_threads);
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  void assert_current_thread_is_primary_refinement_thread() const NOT_DEBUG_RETURN;
-#else /* AARCH64 */
+#ifdef AARCH64
   void assert_current_thread_is_control_refinement_thread() const NOT_DEBUG_RETURN;
+#else /* AARCH64 */
+  void assert_current_thread_is_primary_refinement_thread() const NOT_DEBUG_RETURN;
 #endif /* AARCH64 */
 
   uint max_num_threads() const { return _max_num_threads; }
@@ -103,15 +103,15 @@ public:
   void activate();
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+  void run_task(WorkerTask* task, uint num_workers);
+#else /* AARCH64 */
   // Activate the indicated thread.  If the thread has not yet been allocated,
   // allocate and then activate.  If allocation is needed and fails, return
   // false.  Otherwise return true.
   // precondition: worker_id < max_num_threads().
   // precondition: current thread is not the designated worker.
   bool activate(uint worker_id);
-#else /* AARCH64 */
-  void run_task(WorkerTask* task, uint num_workers);
 #endif /* AARCH64 */
 
 #ifdef AARCH64
@@ -245,10 +245,10 @@ public:
 // to keep pending dirty cards near the target.
 class G1ConcurrentRefine : public CHeapObj<mtGC> {
   G1Policy* _policy;
-#ifndef AARCH64
-  volatile uint _threads_wanted;
-#else /* AARCH64 */
+#ifdef AARCH64
   volatile uint _num_threads_wanted;
+#else /* AARCH64 */
+  volatile uint _threads_wanted;
 #endif /* AARCH64 */
   size_t _pending_cards_target;
   Ticks _last_adjust;
@@ -264,27 +264,27 @@ class G1ConcurrentRefine : public CHeapObj<mtGC> {
   G1DirtyCardQueueSet& _dcqs;
 #endif /* ! AARCH64 */
 
-#ifndef AARCH64
-  G1ConcurrentRefine(G1Policy* policy);
-#else /* AARCH64 */
+#ifdef AARCH64
   G1ConcurrentRefineSweepState _sweep_state;
+#else /* AARCH64 */
+  G1ConcurrentRefine(G1Policy* policy);
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  static uint worker_id_offset();
-#else /* AARCH64 */
+#ifdef AARCH64
   G1ConcurrentRefine(G1CollectedHeap* g1h);
+#else /* AARCH64 */
+  static uint worker_id_offset();
 #endif /* AARCH64 */
 
   jint initialize();
 
-#ifndef AARCH64
-  void assert_current_thread_is_primary_refinement_thread() const {
-    _thread_control.assert_current_thread_is_primary_refinement_thread();
-  }
-#else /* AARCH64 */
+#ifdef AARCH64
   void assert_current_thread_is_control_refinement_thread() const {
     _thread_control.assert_current_thread_is_control_refinement_thread();
+  }
+#else /* AARCH64 */
+  void assert_current_thread_is_primary_refinement_thread() const {
+    _thread_control.assert_current_thread_is_primary_refinement_thread();
   }
 #endif /* AARCH64 */
 
@@ -297,13 +297,13 @@ class G1ConcurrentRefine : public CHeapObj<mtGC> {
     return _pending_cards_target != PendingCardsTargetUninitialized;
   }
 
-#ifndef AARCH64
+#ifdef AARCH64
+  void update_pending_cards_target(double pending_cards_scan_time_ms,
+                                   size_t processed_pending_cards,
+#else /* AARCH64 */
   void update_pending_cards_target(double logged_cards_scan_time_ms,
                                    size_t processed_logged_cards,
                                    size_t predicted_thread_buffer_cards,
-#else /* AARCH64 */
-  void update_pending_cards_target(double pending_cards_scan_time_ms,
-                                   size_t processed_pending_cards,
 #endif /* AARCH64 */
                                    double goal_ms);
 
@@ -334,10 +334,10 @@ public:
 #endif /* AARCH64 */
   // Returns a G1ConcurrentRefine instance if succeeded to create/initialize the
   // G1ConcurrentRefine instance. Otherwise, returns null with error code.
-#ifndef AARCH64
-  static G1ConcurrentRefine* create(G1Policy* policy, jint* ecode);
-#else /* AARCH64 */
+#ifdef AARCH64
   static G1ConcurrentRefine* create(G1CollectedHeap* g1h, jint* ecode);
+#else /* AARCH64 */
+  static G1ConcurrentRefine* create(G1Policy* policy, jint* ecode);
 #endif /* AARCH64 */
 
   // Stop all the refinement threads.
@@ -349,28 +349,20 @@ public:
   // adjustment thread (primary on legacy, control on AArch64) is active, so it
   // will adjust the number
   // of running threads.
-#ifndef AARCH64
+#ifdef AARCH64
+  void adjust_after_gc(double pending_cards_scan_time_ms,
+                       size_t processed_pending_cards,
+#else /* AARCH64 */
   void adjust_after_gc(double logged_cards_scan_time_ms,
                        size_t processed_logged_cards,
                        size_t predicted_thread_buffer_cards,
-#else /* AARCH64 */
-  void adjust_after_gc(double pending_cards_scan_time_ms,
-                       size_t processed_pending_cards,
 #endif /* AARCH64 */
                        double goal_ms);
 
   // Target number of pending dirty cards at the start of the next GC.
   size_t pending_cards_target() const { return _pending_cards_target; }
 
-#ifndef AARCH64
-  // May recalculate the number of refinement threads that should be active in
-  // order to meet the pending cards target.  Returns true if adjustment was
-  // performed, and clears any pending request.  Returns false if the
-  // adjustment period has not expired, or because a timed or requested
-  // adjustment could not be performed immediately and so was deferred.
-  // precondition: current thread is the primary refinement thread.
-  bool adjust_threads_periodically();
-#else /* AARCH64 */
+#ifdef AARCH64
   // Recalculates the number of refinement threads that should be active in
   // order to meet the pending cards target.
   // Returns true if it could recalculate the number of threads and
@@ -378,6 +370,14 @@ public:
   // Returns false if the adjustment period has not expired, or because a timed
   // or requested adjustment could not be performed immediately and so was deferred.
   bool adjust_num_threads_periodically();
+#else /* AARCH64 */
+  // May recalculate the number of refinement threads that should be active in
+  // order to meet the pending cards target.  Returns true if adjustment was
+  // performed, and clears any pending request.  Returns false if the
+  // adjustment period has not expired, or because a timed or requested
+  // adjustment could not be performed immediately and so was deferred.
+  // precondition: current thread is the primary refinement thread.
+  bool adjust_threads_periodically();
 #endif /* AARCH64 */
 
   // The amount of time (in ms) the thread responsible for refinement adjustment
@@ -394,7 +394,14 @@ public:
   // precondition: current thread performs refinement adjustment.
   bool is_thread_adjustment_needed() const;
 
-#ifndef AARCH64
+#ifdef AARCH64
+  // Indicate that last refinement adjustment had been deferred due to not
+  // obtaining the heap lock.
+  bool heap_was_locked() const { return _heap_was_locked; }
+
+  uint num_threads_wanted() const { return _num_threads_wanted; }
+  uint max_num_threads() const { return _thread_control.max_num_threads(); }
+#else /* AARCH64 */
   // Reduce the number of active threads wanted.
   // precondition: current thread is the primary refinement thread.
   void reduce_threads_wanted();
@@ -412,24 +419,17 @@ public:
   bool try_refinement_step(uint worker_id,
                            size_t stop_at,
                            G1ConcurrentRefineStats* stats);
-#else /* AARCH64 */
-  // Indicate that last refinement adjustment had been deferred due to not
-  // obtaining the heap lock.
-  bool heap_was_locked() const { return _heap_was_locked; }
-
-  uint num_threads_wanted() const { return _num_threads_wanted; }
-  uint max_num_threads() const { return _thread_control.max_num_threads(); }
 #endif /* AARCH64 */
 
   // Iterate over all concurrent refinement threads applying the given closure.
   void threads_do(ThreadClosure *tc);
-#ifndef AARCH64
-  // Maximum number of refinement threads.
-  static uint max_num_threads();
-#else /* AARCH64 */
+#ifdef AARCH64
   // Iterate over specific refinement threads applying the given closure.
   void worker_threads_do(ThreadClosure *tc);
   void control_thread_do(ThreadClosure *tc);
+#else /* AARCH64 */
+  // Maximum number of refinement threads.
+  static uint max_num_threads();
 #endif /* AARCH64 */
 };
 

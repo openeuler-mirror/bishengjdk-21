@@ -36,11 +36,11 @@
 #include "gc/g1/g1ConcurrentMark.inline.hpp"
 #include "gc/g1/g1ConcurrentMarkThread.inline.hpp"
 #include "gc/g1/g1ConcurrentRebuildAndScrub.hpp"
-#ifndef AARCH64
-#include "gc/g1/g1DirtyCardQueue.hpp"
-#else /* AARCH64 */
+#ifdef AARCH64
 #include "gc/g1/g1ConcurrentRefine.hpp"
 #include "gc/g1/g1HRPrinter.hpp"
+#else /* AARCH64 */
+#include "gc/g1/g1DirtyCardQueue.hpp"
 #endif /* AARCH64 */
 #include "gc/g1/g1HeapVerifier.hpp"
 #include "gc/g1/g1OopClosures.inline.hpp"
@@ -393,10 +393,10 @@ G1ConcurrentMark::G1ConcurrentMark(G1CollectedHeap* g1h,
 
   // _finger set in set_non_marking_state
 
-#ifndef AARCH64
-  _worker_id_offset(G1DirtyCardQueueSet::num_par_ids() + G1ConcRefinementThreads),
-#else /* AARCH64 */
+#ifdef AARCH64
   _worker_id_offset(G1ConcRefinementThreads), // The refinement control thread does not refine cards, so it's just the worker threads.
+#else /* AARCH64 */
+  _worker_id_offset(G1DirtyCardQueueSet::num_par_ids() + G1ConcRefinementThreads),
 #endif /* AARCH64 */
   _max_num_tasks(MAX2(ConcGCThreads, ParallelGCThreads)),
   // _num_active_tasks set in set_non_marking_state()
@@ -1068,10 +1068,10 @@ void G1ConcurrentMark::mark_from_roots() {
   // worker threads may currently exist and more may not be
   // available.
   active_workers = _concurrent_workers->set_active_workers(active_workers);
-#ifndef AARCH64
-  log_info(gc, task)("Using %u workers of %u for marking", active_workers, _concurrent_workers->max_workers());
-#else /* AARCH64 */
+#ifdef AARCH64
   log_info(gc, task)("Concurrent Mark Using %u of %u Workers", active_workers, _concurrent_workers->max_workers());
+#else /* AARCH64 */
+  log_info(gc, task)("Using %u workers of %u for marking", active_workers, _concurrent_workers->max_workers());
 #endif /* AARCH64 */
 
   // Parallel task terminator is set in "set_concurrency_and_phase()"

@@ -107,10 +107,10 @@ void HeapRegion::setup_heap_region_size(size_t max_heap_size) {
   }
 }
 
-#ifndef AARCH64
-void HeapRegion::handle_evacuation_failure() {
-#else /* AARCH64 */
+#ifdef AARCH64
 void HeapRegion::handle_evacuation_failure(bool retain) {
+#else /* AARCH64 */
+void HeapRegion::handle_evacuation_failure() {
 #endif /* AARCH64 */
   uninstall_surv_rate_group();
   clear_young_index_in_cset();
@@ -118,10 +118,10 @@ void HeapRegion::handle_evacuation_failure(bool retain) {
   move_to_old();
 
   _rem_set->clean_code_roots(this);
-#ifndef AARCH64
-  _rem_set->clear(true /* only_cardset */);
-#else /* AARCH64 */
+#ifdef AARCH64
   _rem_set->clear(true /* only_cardset */, retain /* keep_tracked */);
+#else /* AARCH64 */
+  _rem_set->clear(true /* only_cardset */);
 #endif /* AARCH64 */
 }
 
@@ -145,13 +145,13 @@ void HeapRegion::hr_clear(bool clear_space) {
   if (clear_space) clear(SpaceDecorator::Mangle);
 }
 
-#ifndef AARCH64
-void HeapRegion::clear_cardtable() {
+#ifdef AARCH64
+void HeapRegion::clear_card_table() {
   G1CardTable* ct = G1CollectedHeap::heap()->card_table();
   ct->clear_MemRegion(MemRegion(bottom(), end()));
 }
 #else /* AARCH64 */
-void HeapRegion::clear_card_table() {
+void HeapRegion::clear_cardtable() {
   G1CardTable* ct = G1CollectedHeap::heap()->card_table();
   ct->clear_MemRegion(MemRegion(bottom(), end()));
 }
@@ -182,12 +182,12 @@ double HeapRegion::calc_gc_efficiency() {
 }
 
 void HeapRegion::set_free() {
-#ifndef AARCH64
-  report_region_type_change(G1HeapRegionTraceType::Free);
-#else /* AARCH64 */
+#ifdef AARCH64
   if (!is_free()) {
     report_region_type_change(G1HeapRegionTraceType::Free);
   }
+#else /* AARCH64 */
+  report_region_type_change(G1HeapRegionTraceType::Free);
 #endif /* AARCH64 */
   _type.set_free();
 }
@@ -303,10 +303,10 @@ void HeapRegion::report_region_type_change(G1HeapRegionTraceType::Type to) {
                                             used());
 }
 
-#ifndef AARCH64
- void HeapRegion::note_evacuation_failure(bool during_concurrent_start) {
-#else /* AARCH64 */
+#ifdef AARCH64
 void HeapRegion::note_evacuation_failure() {
+#else /* AARCH64 */
+ void HeapRegion::note_evacuation_failure(bool during_concurrent_start) {
 #endif /* AARCH64 */
   // PB must be bottom - we only evacuate old gen regions after scrubbing, and
   // young gen regions never have their PB set to anything other than bottom.
@@ -601,16 +601,16 @@ class G1VerifyLiveAndRemSetClosure : public BasicOopIterateClosure {
 
     HeapRegion* _from;
     HeapRegion* _to;
-#ifndef AARCH64
-    CardValue _cv_obj;
-    CardValue _cv_field;
-#else /* AARCH64 */
+#ifdef AARCH64
 
     CardValue _cv_obj_ct;    // In card table.
     CardValue _cv_field_ct;
 
     CardValue _cv_obj_rt;    // In refinement table.
     CardValue _cv_field_rt;
+#else /* AARCH64 */
+    CardValue _cv_obj;
+    CardValue _cv_field;
 #endif /* AARCH64 */
 
     RemSetChecker(G1VerifyLiveAndRemSetClosure* cl, oop containing_obj, T* p, oop obj) : Checker<T>(cl, containing_obj, p, obj) {
@@ -618,36 +618,36 @@ class G1VerifyLiveAndRemSetClosure : public BasicOopIterateClosure {
       _to = this->_g1h->heap_region_containing(obj);
 
       CardTable* ct = this->_g1h->card_table();
-#ifndef AARCH64
-      _cv_obj = *ct->byte_for_const(this->_containing_obj);
-      _cv_field = *ct->byte_for_const(p);
-#else /* AARCH64 */
+#ifdef AARCH64
       _cv_obj_ct = *ct->byte_for_const(this->_containing_obj);
       _cv_field_ct = *ct->byte_for_const(p);
 
       ct = this->_g1h->refinement_table();
       _cv_obj_rt = *ct->byte_for_const(this->_containing_obj);
       _cv_field_rt = *ct->byte_for_const(p);
+#else /* AARCH64 */
+      _cv_obj = *ct->byte_for_const(this->_containing_obj);
+      _cv_field = *ct->byte_for_const(p);
 #endif /* AARCH64 */
     }
 
     bool failed() const {
-#ifndef AARCH64
-      if (_from != _to && !_from->is_young() && _to->rem_set()->is_complete()) {
-        const CardValue dirty = G1CardTable::dirty_card_val();
-#else /* AARCH64 */
+#ifdef AARCH64
       if (_from != _to && !_from->is_young() &&
           _to->rem_set()->is_complete()) {
         const CardValue clean = G1CardTable::clean_card_val();
+#else /* AARCH64 */
+      if (_from != _to && !_from->is_young() && _to->rem_set()->is_complete()) {
+        const CardValue dirty = G1CardTable::dirty_card_val();
 #endif /* AARCH64 */
         return !(_to->rem_set()->contains_reference(this->_p) ||
                  (this->_containing_obj->is_objArray() ?
-#ifndef AARCH64
-                  _cv_field == dirty :
-                  _cv_obj == dirty || _cv_field == dirty));
-#else /* AARCH64 */
+#ifdef AARCH64
                   (_cv_field_ct != clean || _cv_field_rt != clean) :
                   (_cv_obj_ct != clean || _cv_field_ct != clean || _cv_obj_rt != clean || _cv_field_rt != clean)));
+#else /* AARCH64 */
+                  _cv_field == dirty :
+                  _cv_obj == dirty || _cv_field == dirty));
 #endif /* AARCH64 */
       }
       return false;
@@ -666,11 +666,11 @@ class G1VerifyLiveAndRemSetClosure : public BasicOopIterateClosure {
       log.error("Missing rem set entry:");
       this->print_containing_obj(&ls, _from);
       this->print_referenced_obj(&ls, _to, "");
-#ifndef AARCH64
-      log.error("Obj head CV = %d, field CV = %d.", _cv_obj, _cv_field);
-#else /* AARCH64 */
+#ifdef AARCH64
       log.error("CT obj head CV = %d, field CV = %d.", _cv_obj_ct, _cv_field_ct);
       log.error("RT Obj head CV = %d, field CV = %d.", _cv_obj_rt, _cv_field_rt);
+#else /* AARCH64 */
+      log.error("Obj head CV = %d, field CV = %d.", _cv_obj, _cv_field);
 #endif /* AARCH64 */
       log.error("----------");
     }

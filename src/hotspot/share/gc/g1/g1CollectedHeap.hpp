@@ -193,9 +193,7 @@ private:
 #endif /* AARCH64 */
 
   WorkerThreads* _workers;
-#ifndef AARCH64
-  G1CardTable* _card_table;
-#else /* AARCH64 */
+#ifdef AARCH64
 
   // The current epoch for refinement, i.e. the number of times the card tables
   // have been swapped by a garbage collection.
@@ -210,6 +208,8 @@ private:
   jlong _last_refinement_epoch_start;
   jlong _yield_duration_in_refinement_epoch;       // Time spent in safepoints since beginning of last refinement epoch.
   size_t _last_safepoint_refinement_epoch;         // Refinement epoch before last safepoint.
+#else /* AARCH64 */
+  G1CardTable* _card_table;
 #endif /* AARCH64 */
 
   Ticks _collection_pause_end;
@@ -584,15 +584,15 @@ public:
   // memory usage and maintenance costs of that table.
   // Testing showed that 64 for 1M/2M region, 128 for 4M/8M regions, 256 for 16/32M regions,
   // and so on seems to be such a good trade-off.
-#ifndef AARCH64
-  static uint get_chunks_per_region();
-#else /* AARCH64 */
+#ifdef AARCH64
   static uint get_chunks_per_region_for_scan();
   // Return "optimal" number of chunks per region we want to use for claiming areas
   // within a region to claim during card table merging.
   // This is much smaller than for scanning as the merge work is much smaller.
   // Currently 1 for 1M regions, 2 for 2/4M regions, 4 for 8/16M regions and so on.
   static uint get_chunks_per_region_for_merge();
+#else /* AARCH64 */
+  static uint get_chunks_per_region();
 #endif /* AARCH64 */
 
   G1Allocator* allocator() {
@@ -734,14 +734,14 @@ public:
   // at the same time.
   void free_region(HeapRegion* hr, FreeRegionList* free_list);
 
-#ifndef AARCH64
+#ifdef AARCH64
+  void retain_region(HeapRegion* hr);
+#else /* AARCH64 */
   // It dirties the cards that cover the block so that the post
   // write barrier never queues anything when updating objects on this
   // block. It is assumed (and in fact we assert) that the block
   // belongs to a young region.
   inline void dirty_young_block(HeapWord* start, size_t word_size);
-#else /* AARCH64 */
-  void retain_region(HeapRegion* hr);
 #endif /* AARCH64 */
 
   // Frees a humongous region by collapsing it into individual regions
@@ -1117,10 +1117,10 @@ public:
   }
 
   G1CardTable* card_table() const {
-#ifndef AARCH64
-    return _card_table;
-#else /* AARCH64 */
+#ifdef AARCH64
     return static_cast<G1CardTable*>(G1BarrierSet::g1_barrier_set()->card_table());
+#else /* AARCH64 */
+    return _card_table;
 #endif /* AARCH64 */
   }
 

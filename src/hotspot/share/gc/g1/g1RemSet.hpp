@@ -69,13 +69,13 @@ private:
 
   G1CollectedHeap* _g1h;
 
-#ifndef AARCH64
+#ifdef AARCH64
+  G1Policy* _g1p;
+#else /* AARCH64 */
   G1CardTable*           _ct;
   G1Policy*              _g1p;
 
   void print_merge_heap_roots_stats();
-#else /* AARCH64 */
-  G1Policy* _g1p;
 #endif /* AARCH64 */
 
   void assert_scan_top_is_null(uint hrm_index) NOT_DEBUG_RETURN;
@@ -88,10 +88,10 @@ public:
   // Initialize data that depends on the heap size being known.
   void initialize(uint max_reserved_regions);
 
-#ifndef AARCH64
-  G1RemSet(G1CollectedHeap* g1h, G1CardTable* ct);
-#else /* AARCH64 */
+#ifdef AARCH64
   G1RemSet(G1CollectedHeap* g1h);
+#else /* AARCH64 */
+  G1RemSet(G1CollectedHeap* g1h, G1CardTable* ct);
 #endif /* AARCH64 */
   ~G1RemSet();
 
@@ -136,13 +136,7 @@ public:
                                           G1GCPhaseTimes::GCParPhases scan_phase,
                                           G1GCPhaseTimes::GCParPhases objcopy_phase);
 
-#ifndef AARCH64
-  // Two methods for concurrent refinement support, executed concurrently to
-  // the mutator:
-  // Cleans the card at "*card_ptr_addr" before refinement, returns true iff the
-  // card needs later refinement.
-  bool clean_card_before_refine(CardValue** const card_ptr_addr);
-#else /* AARCH64 */
+#ifdef AARCH64
   enum RefineResult {
       HasRefToCSet,          // The (dirty) card has a reference to the collection set.
       AlreadyToCSet,         // The card is already one marked as having a reference to the collection set.
@@ -151,16 +145,22 @@ public:
                              // references to such after dirtying the card.
       CouldNotParse          // The card is unparsable, need to retry later.
   };
+#else /* AARCH64 */
+  // Two methods for concurrent refinement support, executed concurrently to
+  // the mutator:
+  // Cleans the card at "*card_ptr_addr" before refinement, returns true iff the
+  // card needs later refinement.
+  bool clean_card_before_refine(CardValue** const card_ptr_addr);
 #endif /* AARCH64 */
   // Refine the region corresponding to "card_ptr". Must be called after
   // being filtered by clean_card_before_refine(), and after proper
   // fence/synchronization.
-#ifndef AARCH64
-  void refine_card_concurrently(CardValue* const card_ptr,
-                                const uint worker_id);
-#else /* AARCH64 */
+#ifdef AARCH64
   RefineResult refine_card_concurrently(CardValue* const card_ptr,
                                         const uint worker_id);
+#else /* AARCH64 */
+  void refine_card_concurrently(CardValue* const card_ptr,
+                                const uint worker_id);
 #endif /* AARCH64 */
 
   // Print accumulated summary info from the start of the VM.

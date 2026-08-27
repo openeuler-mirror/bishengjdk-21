@@ -41,10 +41,10 @@ class MachNode;
 
 class MacroAssembler;
 
-#ifndef AARCH64
-class ZBarrierStubC2 : public ArenaObj {
-#else /* AARCH64 */
+#ifdef AARCH64
 class ZBarrierStubC2 : public BarrierStubC2 {
+#else /* AARCH64 */
+class ZBarrierStubC2 : public ArenaObj {
 #endif /* AARCH64 */
 protected:
 #ifndef AARCH64

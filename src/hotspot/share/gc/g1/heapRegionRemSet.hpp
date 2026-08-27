@@ -116,10 +116,10 @@ public:
 
   // The region is being reclaimed; clear its remset, and any mention of
   // entries for this region in other remsets.
-#ifndef AARCH64
-  void clear(bool only_cardset = false);
-#else /* AARCH64 */
+#ifdef AARCH64
   void clear(bool only_cardset = false, bool keep_tracked = false);
+#else /* AARCH64 */
+  void clear(bool only_cardset = false);
 #endif /* AARCH64 */
 
   void reset_table_scanner();

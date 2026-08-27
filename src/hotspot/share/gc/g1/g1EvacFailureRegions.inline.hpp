@@ -40,11 +40,11 @@ bool G1EvacFailureRegions::record(uint region_idx) {
 
     G1CollectedHeap* g1h = G1CollectedHeap::heap();
     HeapRegion* hr = g1h->region_at(region_idx);
-#ifndef AARCH64
+#ifdef AARCH64
+    hr->note_evacuation_failure();
+#else /* AARCH64 */
     G1CollectorState* state = g1h->collector_state();
     hr->note_evacuation_failure(state->in_concurrent_start_gc());
-#else /* AARCH64 */
-    hr->note_evacuation_failure();
 #endif /* AARCH64 */
   }
   return success;

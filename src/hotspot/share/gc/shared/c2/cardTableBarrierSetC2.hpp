@@ -49,10 +49,10 @@ public:
   virtual void eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const;
   virtual bool array_copy_requires_gc_barriers(bool tightly_coupled_alloc, BasicType type, bool is_clone, bool is_clone_instance, ArrayCopyPhase phase) const;
 
-#ifndef AARCH64
-  bool use_ReduceInitialCardMarks() const;
-#else /* AARCH64 */
+#ifdef AARCH64
   static bool use_ReduceInitialCardMarks();
+#else /* AARCH64 */
+  bool use_ReduceInitialCardMarks() const;
 #endif /* AARCH64 */
 };
 

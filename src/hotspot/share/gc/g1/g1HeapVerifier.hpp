@@ -79,9 +79,7 @@ public:
   // Do sanity check on the contents of the in-cset fast test table.
   bool check_region_attr_table() PRODUCT_RETURN_( return true; );
 
-#ifndef AARCH64
-  void verify_card_table_cleanup() PRODUCT_RETURN;
-#else /* AARCH64 */
+#ifdef AARCH64
   void verify_card_table_cleanup();
   void verify_card_tables_clean(bool both_card_tables);
 
@@ -89,15 +87,17 @@ public:
   void verify_rt_dirty_to_dummy_top(HeapRegion* hr);
   void verify_rt_clean_from_top(HeapRegion* hr);
   void verify_rt_clean_region(HeapRegion* hr);
+#else /* AARCH64 */
+  void verify_card_table_cleanup() PRODUCT_RETURN;
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+  // Verify that the global card table and the thread's card tables are in sync.
+  void verify_card_tables_in_sync() PRODUCT_RETURN;
+#else /* AARCH64 */
   void verify_not_dirty_region(HeapRegion* hr) PRODUCT_RETURN;
   void verify_dirty_region(HeapRegion* hr) PRODUCT_RETURN;
   void verify_dirty_young_regions() PRODUCT_RETURN;
-#else /* AARCH64 */
-  // Verify that the global card table and the thread's card tables are in sync.
-  void verify_card_tables_in_sync() PRODUCT_RETURN;
 #endif /* AARCH64 */
 };
 

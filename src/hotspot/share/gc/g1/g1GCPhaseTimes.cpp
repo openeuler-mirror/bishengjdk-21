@@ -51,11 +51,11 @@ G1GCPhaseTimes::G1GCPhaseTimes(STWGCTimer* gc_timer, uint max_gc_threads) :
 {
   assert(max_gc_threads > 0, "Must have some GC threads");
 
-#ifndef AARCH64
+#ifdef AARCH64
+  _gc_par_phases[RetireTLABs] = new WorkerDataArray<double>("RetireTLABs", "JavaThread Retire TLABs (ms):", max_gc_threads);
+#else /* AARCH64 */
   _gc_par_phases[RetireTLABsAndFlushLogs] = new WorkerDataArray<double>("RetireTLABsAndFlushLogs", "JT Retire TLABs And Flush Logs (ms):", max_gc_threads);
   _gc_par_phases[NonJavaThreadFlushLogs] = new WorkerDataArray<double>("NonJavaThreadFlushLogs", "Non-JT Flush Logs (ms):", max_gc_threads);
-#else /* AARCH64 */
-  _gc_par_phases[RetireTLABs] = new WorkerDataArray<double>("RetireTLABs", "JavaThread Retire TLABs (ms):", max_gc_threads);
 #endif /* AARCH64 */
 
   _gc_par_phases[GCWorkerStart] = new WorkerDataArray<double>("GCWorkerStart", "GC Worker Start (ms):", max_gc_threads);
@@ -88,10 +88,10 @@ G1GCPhaseTimes::G1GCPhaseTimes(STWGCTimer* gc_timer, uint max_gc_threads) :
     _gc_par_phases[OptMergeRS]->create_thread_work_items(GCMergeRSWorkItemsStrings[i], i);
   }
 
-#ifndef AARCH64
-  _gc_par_phases[MergeLB] = new WorkerDataArray<double>("MergeLB", "Log Buffers (ms):", max_gc_threads);
-#else /* AARCH64 */
+#ifdef AARCH64
   _gc_par_phases[SweepRT] = new WorkerDataArray<double>("SweepRT", "Sweep (ms):", max_gc_threads);
+#else /* AARCH64 */
+  _gc_par_phases[MergeLB] = new WorkerDataArray<double>("MergeLB", "Log Buffers (ms):", max_gc_threads);
 #endif /* AARCH64 */
   _gc_par_phases[ScanHR] = new WorkerDataArray<double>("ScanHR", "Scan Heap Roots (ms):", max_gc_threads);
   _gc_par_phases[OptScanHR] = new WorkerDataArray<double>("OptScanHR", "Optional Scan Heap Roots (ms):", max_gc_threads);
@@ -107,10 +107,10 @@ G1GCPhaseTimes::G1GCPhaseTimes(STWGCTimer* gc_timer, uint max_gc_threads) :
   _gc_par_phases[MergePSS] = new WorkerDataArray<double>("MergePSS", "Merge Per-Thread State (ms):", max_gc_threads);
   _gc_par_phases[RestoreRetainedRegions] = new WorkerDataArray<double>("RestoreRetainedRegions", "Restore Retained Regions (ms):", max_gc_threads);
   _gc_par_phases[RemoveSelfForwards] = new WorkerDataArray<double>("RemoveSelfForwards", "Remove Self Forwards (ms):", max_gc_threads);
-#ifndef AARCH64
-  _gc_par_phases[ClearCardTable] = new WorkerDataArray<double>("ClearLoggedCards", "Clear Logged Cards (ms):", max_gc_threads);
-#else /* AARCH64 */
+#ifdef AARCH64
   _gc_par_phases[ClearCardTable] = new WorkerDataArray<double>("ClearPendingCards", "Clear Pending Cards (ms):", max_gc_threads);
+#else /* AARCH64 */
+  _gc_par_phases[ClearCardTable] = new WorkerDataArray<double>("ClearLoggedCards", "Clear Logged Cards (ms):", max_gc_threads);
 #endif /* AARCH64 */
   _gc_par_phases[RecalculateUsed] = new WorkerDataArray<double>("RecalculateUsed", "Recalculate Used Memory (ms):", max_gc_threads);
 #if COMPILER2_OR_JVMCI
@@ -118,10 +118,10 @@ G1GCPhaseTimes::G1GCPhaseTimes(STWGCTimer* gc_timer, uint max_gc_threads) :
 #endif
   _gc_par_phases[EagerlyReclaimHumongousObjects] = new WorkerDataArray<double>("EagerlyReclaimHumongousObjects", "Eagerly Reclaim Humongous Objects (ms):", max_gc_threads);
   _gc_par_phases[RestorePreservedMarks] = new WorkerDataArray<double>("RestorePreservedMarks", "Restore Preserved Marks (ms):", max_gc_threads);
-#ifndef AARCH64
-  _gc_par_phases[ClearRetainedRegionBitmaps] = new WorkerDataArray<double>("ClearRetainedRegionsBitmap", "Clear Retained Region Bitmaps (ms):", max_gc_threads);
-#else /* AARCH64 */
+#ifdef AARCH64
   _gc_par_phases[ProcessEvacuationFailedRegions] = new WorkerDataArray<double>("ProcessEvacuationFailedRegions", "Process Evacuation Failed Regions (ms):", max_gc_threads);
+#else /* AARCH64 */
+  _gc_par_phases[ClearRetainedRegionBitmaps] = new WorkerDataArray<double>("ClearRetainedRegionsBitmap", "Clear Retained Region Bitmaps (ms):", max_gc_threads);
 #endif /* AARCH64 */
 
 #ifdef AARCH64
@@ -144,22 +144,18 @@ G1GCPhaseTimes::G1GCPhaseTimes(STWGCTimer* gc_timer, uint max_gc_threads) :
   _gc_par_phases[OptScanHR]->create_thread_work_items("Scanned Refs:", ScanHRScannedOptRefs);
   _gc_par_phases[OptScanHR]->create_thread_work_items("Used Memory:", ScanHRUsedMemory);
 
-#ifndef AARCH64
+#ifdef AARCH64
+  _gc_par_phases[CodeRoots]->create_thread_work_items("Scanned Nmethods:", CodeRootsScannedNMethods);
+#else /* AARCH64 */
   _gc_par_phases[MergeLB]->create_thread_work_items("Dirty Cards:", MergeLBDirtyCards);
   _gc_par_phases[MergeLB]->create_thread_work_items("Skipped Cards:", MergeLBSkippedCards);
 
   _gc_par_phases[CodeRoots]->create_thread_work_items("Scanned Nmethods", CodeRootsScannedNMethods);
-#else /* AARCH64 */
-  _gc_par_phases[CodeRoots]->create_thread_work_items("Scanned Nmethods:", CodeRootsScannedNMethods);
 #endif /* AARCH64 */
 
   _gc_par_phases[OptCodeRoots]->create_thread_work_items("Scanned Nmethods", CodeRootsScannedNMethods);
 
-#ifndef AARCH64
-  _gc_par_phases[MergePSS]->create_thread_work_items("Copied Bytes", MergePSSCopiedBytes);
-  _gc_par_phases[MergePSS]->create_thread_work_items("LAB Waste", MergePSSLABWasteBytes);
-  _gc_par_phases[MergePSS]->create_thread_work_items("LAB Undo Waste", MergePSSLABUndoWasteBytes);
-#else /* AARCH64 */
+#ifdef AARCH64
   _gc_par_phases[MergePSS]->create_thread_work_items("Copied Bytes:", MergePSSCopiedBytes);
   _gc_par_phases[MergePSS]->create_thread_work_items("LAB Waste:", MergePSSLABWasteBytes);
   _gc_par_phases[MergePSS]->create_thread_work_items("LAB Undo Waste:", MergePSSLABUndoWasteBytes);
@@ -167,13 +163,17 @@ G1GCPhaseTimes::G1GCPhaseTimes(STWGCTimer* gc_timer, uint max_gc_threads) :
   _gc_par_phases[MergePSS]->create_thread_work_items("To-Young-Gen Cards:", MergePSSToYoungGenCards);
   _gc_par_phases[MergePSS]->create_thread_work_items("Evac-Fail Cards:", MergePSSEvacFail);
   _gc_par_phases[MergePSS]->create_thread_work_items("Marked Cards:", MergePSSMarked);
+#else /* AARCH64 */
+  _gc_par_phases[MergePSS]->create_thread_work_items("Copied Bytes", MergePSSCopiedBytes);
+  _gc_par_phases[MergePSS]->create_thread_work_items("LAB Waste", MergePSSLABWasteBytes);
+  _gc_par_phases[MergePSS]->create_thread_work_items("LAB Undo Waste", MergePSSLABUndoWasteBytes);
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  _gc_par_phases[RestoreRetainedRegions]->create_thread_work_items("Evacuation Failure Regions:", RestoreRetainedRegionsNum);
-#else /* AARCH64 */
+#ifdef AARCH64
   _gc_par_phases[RestoreRetainedRegions]->create_thread_work_items("Evacuation Failed Regions:", RestoreRetainedRegionsFailedNum);
   _gc_par_phases[RestoreRetainedRegions]->create_thread_work_items("New Retained Regions:", RestoreRetainedRegionsRetainedNum);
+#else /* AARCH64 */
+  _gc_par_phases[RestoreRetainedRegions]->create_thread_work_items("Evacuation Failure Regions:", RestoreRetainedRegionsNum);
 #endif /* AARCH64 */
 
   _gc_par_phases[RemoveSelfForwards]->create_thread_work_items("Forward Chunks:", RemoveSelfForwardChunksNum);
@@ -294,10 +294,10 @@ void G1GCPhaseTimes::record_gc_pause_end() {
       ASSERT_PHASE_UNINITIALIZED(MergeER);
       ASSERT_PHASE_UNINITIALIZED(MergeRS);
       ASSERT_PHASE_UNINITIALIZED(OptMergeRS);
-#ifndef AARCH64
-      ASSERT_PHASE_UNINITIALIZED(MergeLB);
-#else /* AARCH64 */
+#ifdef AARCH64
       ASSERT_PHASE_UNINITIALIZED(SweepRT);
+#else /* AARCH64 */
+      ASSERT_PHASE_UNINITIALIZED(MergeLB);
 #endif /* AARCH64 */
       ASSERT_PHASE_UNINITIALIZED(ScanHR);
       ASSERT_PHASE_UNINITIALIZED(CodeRoots);
@@ -471,11 +471,11 @@ double G1GCPhaseTimes::print_pre_evacuate_collection_set() const {
   info_time("Pre Evacuate Collection Set", sum_ms);
 
   debug_time("Pre Evacuate Prepare", _cur_pre_evacuate_prepare_time_ms);
-#ifndef AARCH64
+#ifdef AARCH64
+  debug_phase(_gc_par_phases[RetireTLABs], 1);
+#else /* AARCH64 */
   debug_phase(_gc_par_phases[RetireTLABsAndFlushLogs], 1);
   debug_phase(_gc_par_phases[NonJavaThreadFlushLogs], 1);
-#else /* AARCH64 */
-  debug_phase(_gc_par_phases[RetireTLABs], 1);
 #endif /* AARCH64 */
   debug_time("Choose Collection Set", (_recorded_young_cset_choice_time_ms + _recorded_non_young_cset_choice_time_ms));
   debug_time("Region Register", _cur_region_register_time);
@@ -513,11 +513,11 @@ double G1GCPhaseTimes::print_evacuate_initial_collection_set() const {
   debug_time("Prepare Merge Heap Roots", _cur_prepare_merge_heap_roots_time_ms);
   debug_phase_merge_remset();
 
-#ifndef AARCH64
-  debug_phase(_gc_par_phases[MergeLB]);
-#else /* AARCH64 */
+#ifdef AARCH64
   debug_time("Merge Refinement Table", _cur_merge_refinement_table_time_ms);
   debug_phase(_gc_par_phases[SweepRT], 1);
+#else /* AARCH64 */
+  debug_phase(_gc_par_phases[MergeLB]);
 #endif /* AARCH64 */
 
   info_time("Evacuate Collection Set", _cur_collection_initial_evac_time_ms);
@@ -570,10 +570,10 @@ double G1GCPhaseTimes::print_post_evacuate_collection_set(bool evacuation_failed
   if (evacuation_failed) {
     debug_phase(_gc_par_phases[RecalculateUsed], 1);
     debug_phase(_gc_par_phases[RestorePreservedMarks], 1);
-#ifndef AARCH64
-    debug_phase(_gc_par_phases[ClearRetainedRegionBitmaps], 1);
-#else /* AARCH64 */
+#ifdef AARCH64
     debug_phase(_gc_par_phases[ProcessEvacuationFailedRegions], 1);
+#else /* AARCH64 */
+    debug_phase(_gc_par_phases[ClearRetainedRegionBitmaps], 1);
 #endif /* AARCH64 */
   }
 #if COMPILER2_OR_JVMCI

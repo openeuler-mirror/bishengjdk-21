@@ -50,7 +50,16 @@
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/ticks.hpp"
 
-#ifndef AARCH64
+#ifdef AARCH64
+G1ConcurrentRefineThread::G1ConcurrentRefineThread(G1ConcurrentRefine* cr) :
+  ConcurrentGCThread(),
+  _notifier(Mutex::nosafepoint, "G1 Refine Control", true),
+  _requested_active(false),
+  _cr(cr)
+{
+  set_name("G1 Refine Control");
+}
+#else
 G1ConcurrentRefineThread::G1ConcurrentRefineThread(G1ConcurrentRefine* cr, uint worker_id) :
   ConcurrentGCThread(),
   _vtime_start(0.0),
@@ -64,50 +73,9 @@ G1ConcurrentRefineThread::G1ConcurrentRefineThread(G1ConcurrentRefine* cr, uint 
   // set name
   set_name("G1 Refine#%d", worker_id);
 }
-#else
-G1ConcurrentRefineThread::G1ConcurrentRefineThread(G1ConcurrentRefine* cr) :
-  ConcurrentGCThread(),
-  _notifier(Mutex::nosafepoint, "G1 Refine Control", true),
-  _requested_active(false),
-  _cr(cr)
-{
-  set_name("G1 Refine Control");
-}
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-void G1ConcurrentRefineThread::run_service() {
-  _vtime_start = os::elapsedVTime();
-
-  while (wait_for_completed_buffers()) {
-    SuspendibleThreadSetJoiner sts_join;
-    G1ConcurrentRefineStats active_stats_start = _refinement_stats;
-    report_active("Activated");
-    while (!should_terminate()) {
-      if (sts_join.should_yield()) {
-        report_inactive("Paused", _refinement_stats - active_stats_start);
-        sts_join.yield();
-        // Reset after yield rather than accumulating across yields, else a
-        // very long running thread could overflow.
-        active_stats_start = _refinement_stats;
-        report_active("Resumed");
-      } else if (maybe_deactivate()) {
-        break;
-      } else {
-        do_refinement_step();
-      }
-    }
-    report_inactive("Deactivated", _refinement_stats - active_stats_start);
-    if (os::supports_vtime()) {
-      _vtime_accum = (os::elapsedVTime() - _vtime_start);
-    } else {
-      _vtime_accum = 0.0;
-    }
-  }
-
-  log_debug(gc, refine)("Stopping %d", _worker_id);
-}
-#else
+#ifdef AARCH64
 void G1ConcurrentRefineThread::run_service() {
   while (wait_for_work()) {
     SuspendibleThreadSetJoiner sts_join;
@@ -144,22 +112,58 @@ void G1ConcurrentRefineThread::run_service() {
 
   log_debug(gc, refine)("Stopping %s", name());
 }
+#else
+void G1ConcurrentRefineThread::run_service() {
+  _vtime_start = os::elapsedVTime();
+
+  while (wait_for_completed_buffers()) {
+    SuspendibleThreadSetJoiner sts_join;
+    G1ConcurrentRefineStats active_stats_start = _refinement_stats;
+    report_active("Activated");
+    while (!should_terminate()) {
+      if (sts_join.should_yield()) {
+        report_inactive("Paused", _refinement_stats - active_stats_start);
+        sts_join.yield();
+        // Reset after yield rather than accumulating across yields, else a
+        // very long running thread could overflow.
+        active_stats_start = _refinement_stats;
+        report_active("Resumed");
+      } else if (maybe_deactivate()) {
+        break;
+      } else {
+        do_refinement_step();
+      }
+    }
+    report_inactive("Deactivated", _refinement_stats - active_stats_start);
+    if (os::supports_vtime()) {
+      _vtime_accum = (os::elapsedVTime() - _vtime_start);
+    } else {
+      _vtime_accum = 0.0;
+    }
+  }
+
+  log_debug(gc, refine)("Stopping %d", _worker_id);
+}
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+void G1ConcurrentRefineThread::report_active(const char* reason) const {
+  log_trace(gc, refine)("%s active (%s)", name(), reason);
+}
+#else
 void G1ConcurrentRefineThread::report_active(const char* reason) const {
   log_trace(gc, refine)("%s worker %u, current: %zu",
                         reason,
                         _worker_id,
                         G1BarrierSet::dirty_card_queue_set().num_cards());
 }
-#else
-void G1ConcurrentRefineThread::report_active(const char* reason) const {
-  log_trace(gc, refine)("%s active (%s)", name(), reason);
-}
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+void G1ConcurrentRefineThread::report_inactive(const char* reason) const {
+  log_trace(gc, refine)("%s inactive (%s)", name(), reason);
+}
+#else
 void G1ConcurrentRefineThread::report_inactive(const char* reason,
                                                const G1ConcurrentRefineStats& stats) const {
   log_trace(gc, refine)
@@ -169,10 +173,6 @@ void G1ConcurrentRefineThread::report_inactive(const char* reason,
             G1BarrierSet::dirty_card_queue_set().num_cards(),
             stats.refined_cards(),
             stats.refinement_rate_ms());
-}
-#else
-void G1ConcurrentRefineThread::report_inactive(const char* reason) const {
-  log_trace(gc, refine)("%s inactive (%s)", name(), reason);
 }
 #endif /* AARCH64 */
 
@@ -185,7 +185,15 @@ void G1ConcurrentRefineThread::activate() {
   }
 }
 
-#ifndef AARCH64
+#ifdef AARCH64
+bool G1ConcurrentRefineThread::deactivate() {
+  assert(this == Thread::current(), "precondition");
+  MutexLocker ml(&_notifier, Mutex::_no_safepoint_check_flag);
+  bool requested = _requested_active;
+  _requested_active = false;
+  return !requested;  // Deactivate only if not recently requested active.
+}
+#else
 bool G1ConcurrentRefineThread::maybe_deactivate() {
   assert(this == Thread::current(), "precondition");
   if (cr()->is_thread_wanted(_worker_id)) {
@@ -201,14 +209,6 @@ bool G1ConcurrentRefineThread::maybe_deactivate() {
 bool G1ConcurrentRefineThread::try_refinement_step(size_t stop_at) {
   assert(this == Thread::current(), "precondition");
   return _cr->try_refinement_step(_worker_id, stop_at, &_refinement_stats);
-}
-#else
-bool G1ConcurrentRefineThread::deactivate() {
-  assert(this == Thread::current(), "precondition");
-  MutexLocker ml(&_notifier, Mutex::_no_safepoint_check_flag);
-  bool requested = _requested_active;
-  _requested_active = false;
-  return !requested;  // Deactivate only if not recently requested active.
 }
 #endif /* AARCH64 */
 
@@ -305,7 +305,11 @@ void G1SecondaryConcurrentRefineThread::do_refinement_step() {
 
 #endif /* !AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+jlong G1ConcurrentRefineThread::cpu_time() {
+  return os::thread_cpu_time(this);
+}
+#else
 G1ConcurrentRefineThread*
 G1ConcurrentRefineThread::create(G1ConcurrentRefine* cr, uint worker_id) {
   G1ConcurrentRefineThread* crt;
@@ -318,10 +322,6 @@ G1ConcurrentRefineThread::create(G1ConcurrentRefine* cr, uint worker_id) {
     crt->create_and_start();
   }
   return crt;
-}
-#else
-jlong G1ConcurrentRefineThread::cpu_time() {
-  return os::thread_cpu_time(this);
 }
 #endif /* AARCH64 */
 

@@ -37,45 +37,7 @@ inline uint G1CardTable::region_idx_for(CardValue* p) {
   return (uint)(card_idx >> (HeapRegion::LogOfHRGrainBytes - _card_shift));
 }
 
-#ifndef AARCH64
-inline bool G1CardTable::mark_clean_as_dirty(CardValue* card) {
-  CardValue value = *card;
-  if (value == clean_card_val()) {
-    *card = dirty_card_val();
-    return true;
-  }
-  return false;
-}
-
-inline void G1CardTable::mark_range_dirty(size_t start_card_index, size_t num_cards) {
-  assert(is_aligned(start_card_index, sizeof(size_t)), "Start card index must be aligned.");
-  assert(is_aligned(num_cards, sizeof(size_t)), "Number of cards to change must be evenly divisible.");
-
-  size_t const num_chunks = num_cards / sizeof(size_t);
-
-  size_t* cur_word = (size_t*)&_byte_map[start_card_index];
-  size_t* const end_word_map = cur_word + num_chunks;
-  while (cur_word < end_word_map) {
-    size_t value = *cur_word;
-    if (value == WordAllClean) {
-      *cur_word = WordAllDirty;
-    } else if (value == WordAllDirty) {
-      // do nothing.
-    } else {
-      // There is a mix of cards in there. Tread slowly.
-      CardValue* cur = (CardValue*)cur_word;
-      for (size_t i = 0; i < sizeof(size_t); i++) {
-        CardValue value = *cur;
-        if (value == clean_card_val()) {
-          *cur = dirty_card_val();
-        }
-        cur++;
-      }
-    }
-    cur_word++;
-  }
-}
-#else /* AARCH64 */
+#ifdef AARCH64
 inline bool G1CardTable::mark_clean_as_from_remset(CardValue* card) {
   CardValue value = *card;
   if (value == clean_card_val()) {
@@ -122,18 +84,47 @@ inline size_t G1CardTable::mark_clean_range_as_from_remset(size_t start_card_ind
   }
   return result;
 }
-#endif /* AARCH64 */
+#else /* AARCH64 */
+inline bool G1CardTable::mark_clean_as_dirty(CardValue* card) {
+  CardValue value = *card;
+  if (value == clean_card_val()) {
+    *card = dirty_card_val();
+    return true;
+  }
+  return false;
+}
 
-#ifndef AARCH64
-inline void G1CardTable::change_dirty_cards_to(CardValue* start_card, CardValue* end_card, CardValue which) {
-  for (CardValue* i_card = start_card; i_card < end_card; ++i_card) {
-    CardValue value = *i_card;
-    assert(value == dirty_card_val(),
-           "Must have been dirty %d start " PTR_FORMAT " " PTR_FORMAT, value, p2i(start_card), p2i(end_card));
-    *i_card = which;
+inline void G1CardTable::mark_range_dirty(size_t start_card_index, size_t num_cards) {
+  assert(is_aligned(start_card_index, sizeof(size_t)), "Start card index must be aligned.");
+  assert(is_aligned(num_cards, sizeof(size_t)), "Number of cards to change must be evenly divisible.");
+
+  size_t const num_chunks = num_cards / sizeof(size_t);
+
+  size_t* cur_word = (size_t*)&_byte_map[start_card_index];
+  size_t* const end_word_map = cur_word + num_chunks;
+  while (cur_word < end_word_map) {
+    size_t value = *cur_word;
+    if (value == WordAllClean) {
+      *cur_word = WordAllDirty;
+    } else if (value == WordAllDirty) {
+      // do nothing.
+    } else {
+      // There is a mix of cards in there. Tread slowly.
+      CardValue* cur = (CardValue*)cur_word;
+      for (size_t i = 0; i < sizeof(size_t); i++) {
+        CardValue value = *cur;
+        if (value == clean_card_val()) {
+          *cur = dirty_card_val();
+        }
+        cur++;
+      }
+    }
+    cur_word++;
   }
 }
-#else /* AARCH64 */
+#endif /* AARCH64 */
+
+#ifdef AARCH64
 inline size_t G1CardTable::change_dirty_cards_to(CardValue* start_card, CardValue* end_card, CardValue which) {
   size_t result = 0;
   for (CardValue* i_card = start_card; i_card < end_card; ++i_card) {
@@ -146,6 +137,15 @@ inline size_t G1CardTable::change_dirty_cards_to(CardValue* start_card, CardValu
     *i_card = which;
   }
   return result;
+}
+#else /* AARCH64 */
+inline void G1CardTable::change_dirty_cards_to(CardValue* start_card, CardValue* end_card, CardValue which) {
+  for (CardValue* i_card = start_card; i_card < end_card; ++i_card) {
+    CardValue value = *i_card;
+    assert(value == dirty_card_val(),
+           "Must have been dirty %d start " PTR_FORMAT " " PTR_FORMAT, value, p2i(start_card), p2i(end_card));
+    *i_card = which;
+  }
 }
 #endif /* AARCH64 */
 

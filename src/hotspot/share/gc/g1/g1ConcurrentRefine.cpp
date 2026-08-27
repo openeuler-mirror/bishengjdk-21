@@ -54,118 +54,7 @@
 #include "utilities/globalDefinitions.hpp"
 #include <math.h>
 
-#ifndef AARCH64
-G1ConcurrentRefineThread* G1ConcurrentRefineThreadControl::create_refinement_thread(uint worker_id, bool initializing) {
-  G1ConcurrentRefineThread* result = nullptr;
-  if (initializing || !InjectGCWorkerCreationFailure) {
-    result = G1ConcurrentRefineThread::create(_cr, worker_id);
-  }
-  if (result == nullptr || result->osthread() == nullptr) {
-    log_warning(gc)("Failed to create refinement thread %u, no more %s",
-                    worker_id,
-                    result == nullptr ? "memory" : "OS threads");
-    if (result != nullptr) {
-      delete result;
-      result = nullptr;
-    }
-  }
-  return result;
-}
-
-G1ConcurrentRefineThreadControl::G1ConcurrentRefineThreadControl() :
-  _cr(nullptr),
-  _threads(nullptr),
-  _max_num_threads(0)
-{}
-
-G1ConcurrentRefineThreadControl::~G1ConcurrentRefineThreadControl() {
-  if (_threads != nullptr) {
-    for (uint i = 0; i < _max_num_threads; i++) {
-      G1ConcurrentRefineThread* t = _threads[i];
-      if (t == nullptr) {
-#ifdef ASSERT
-        for (uint j = i + 1; j < _max_num_threads; ++j) {
-          assert(_threads[j] == nullptr, "invariant");
-        }
-#endif // ASSERT
-        break;
-      } else {
-        delete t;
-      }
-    }
-    FREE_C_HEAP_ARRAY(G1ConcurrentRefineThread*, _threads);
-  }
-}
-
-jint G1ConcurrentRefineThreadControl::initialize(G1ConcurrentRefine* cr, uint max_num_threads) {
-  assert(cr != nullptr, "G1ConcurrentRefine must not be null");
-  _cr = cr;
-  _max_num_threads = max_num_threads;
-
-  if (max_num_threads > 0) {
-    _threads = NEW_C_HEAP_ARRAY(G1ConcurrentRefineThread*, max_num_threads, mtGC);
-
-    _threads[0] = create_refinement_thread(0, true);
-    if (_threads[0] == nullptr) {
-      vm_shutdown_during_initialization("Could not allocate primary refinement thread");
-      return JNI_ENOMEM;
-    }
-
-    if (UseDynamicNumberOfGCThreads) {
-      for (uint i = 1; i < max_num_threads; ++i) {
-        _threads[i] = nullptr;
-      }
-    } else {
-      for (uint i = 1; i < max_num_threads; ++i) {
-        _threads[i] = create_refinement_thread(i, true);
-        if (_threads[i] == nullptr) {
-          vm_shutdown_during_initialization("Could not allocate refinement threads.");
-          return JNI_ENOMEM;
-        }
-      }
-    }
-  }
-
-  return JNI_OK;
-}
-
-#ifdef ASSERT
-void G1ConcurrentRefineThreadControl::assert_current_thread_is_primary_refinement_thread() const {
-  assert(_threads != nullptr, "No threads");
-  assert(Thread::current() == _threads[0], "Not primary thread");
-}
-#endif // ASSERT
-
-bool G1ConcurrentRefineThreadControl::activate(uint worker_id) {
-  assert(worker_id < _max_num_threads, "precondition");
-  G1ConcurrentRefineThread* thread_to_activate = _threads[worker_id];
-  if (thread_to_activate == nullptr) {
-    thread_to_activate = create_refinement_thread(worker_id, false);
-    if (thread_to_activate == nullptr) {
-      return false;
-    }
-    _threads[worker_id] = thread_to_activate;
-  }
-  thread_to_activate->activate();
-  return true;
-}
-
-void G1ConcurrentRefineThreadControl::worker_threads_do(ThreadClosure* tc) {
-  for (uint i = 0; i < _max_num_threads; i++) {
-    if (_threads[i] != nullptr) {
-      tc->do_thread(_threads[i]);
-    }
-  }
-}
-
-void G1ConcurrentRefineThreadControl::stop() {
-  for (uint i = 0; i < _max_num_threads; i++) {
-    if (_threads[i] != nullptr) {
-      _threads[i]->stop();
-    }
-  }
-}
-#else /* AARCH64 */
+#ifdef AARCH64
 G1ConcurrentRefineThread* G1ConcurrentRefineThreadControl::create_refinement_thread() {
   G1ConcurrentRefineThread* result = nullptr;
   result = G1ConcurrentRefineThread::create(_cr);
@@ -510,52 +399,133 @@ bool G1ConcurrentRefineSweepState::are_java_threads_synched() const {
   return _state > State::SwapJavaThreadsCT || !is_in_progress();
 }
 
+#else /* AARCH64 */
+G1ConcurrentRefineThread* G1ConcurrentRefineThreadControl::create_refinement_thread(uint worker_id, bool initializing) {
+  G1ConcurrentRefineThread* result = nullptr;
+  if (initializing || !InjectGCWorkerCreationFailure) {
+    result = G1ConcurrentRefineThread::create(_cr, worker_id);
+  }
+  if (result == nullptr || result->osthread() == nullptr) {
+    log_warning(gc)("Failed to create refinement thread %u, no more %s",
+                    worker_id,
+                    result == nullptr ? "memory" : "OS threads");
+    if (result != nullptr) {
+      delete result;
+      result = nullptr;
+    }
+  }
+  return result;
+}
+
+G1ConcurrentRefineThreadControl::G1ConcurrentRefineThreadControl() :
+  _cr(nullptr),
+  _threads(nullptr),
+  _max_num_threads(0)
+{}
+
+G1ConcurrentRefineThreadControl::~G1ConcurrentRefineThreadControl() {
+  if (_threads != nullptr) {
+    for (uint i = 0; i < _max_num_threads; i++) {
+      G1ConcurrentRefineThread* t = _threads[i];
+      if (t == nullptr) {
+#ifdef ASSERT
+        for (uint j = i + 1; j < _max_num_threads; ++j) {
+          assert(_threads[j] == nullptr, "invariant");
+        }
+#endif // ASSERT
+        break;
+      } else {
+        delete t;
+      }
+    }
+    FREE_C_HEAP_ARRAY(G1ConcurrentRefineThread*, _threads);
+  }
+}
+
+jint G1ConcurrentRefineThreadControl::initialize(G1ConcurrentRefine* cr, uint max_num_threads) {
+  assert(cr != nullptr, "G1ConcurrentRefine must not be null");
+  _cr = cr;
+  _max_num_threads = max_num_threads;
+
+  if (max_num_threads > 0) {
+    _threads = NEW_C_HEAP_ARRAY(G1ConcurrentRefineThread*, max_num_threads, mtGC);
+
+    _threads[0] = create_refinement_thread(0, true);
+    if (_threads[0] == nullptr) {
+      vm_shutdown_during_initialization("Could not allocate primary refinement thread");
+      return JNI_ENOMEM;
+    }
+
+    if (UseDynamicNumberOfGCThreads) {
+      for (uint i = 1; i < max_num_threads; ++i) {
+        _threads[i] = nullptr;
+      }
+    } else {
+      for (uint i = 1; i < max_num_threads; ++i) {
+        _threads[i] = create_refinement_thread(i, true);
+        if (_threads[i] == nullptr) {
+          vm_shutdown_during_initialization("Could not allocate refinement threads.");
+          return JNI_ENOMEM;
+        }
+      }
+    }
+  }
+
+  return JNI_OK;
+}
+
+#ifdef ASSERT
+void G1ConcurrentRefineThreadControl::assert_current_thread_is_primary_refinement_thread() const {
+  assert(_threads != nullptr, "No threads");
+  assert(Thread::current() == _threads[0], "Not primary thread");
+}
+#endif // ASSERT
+
+bool G1ConcurrentRefineThreadControl::activate(uint worker_id) {
+  assert(worker_id < _max_num_threads, "precondition");
+  G1ConcurrentRefineThread* thread_to_activate = _threads[worker_id];
+  if (thread_to_activate == nullptr) {
+    thread_to_activate = create_refinement_thread(worker_id, false);
+    if (thread_to_activate == nullptr) {
+      return false;
+    }
+    _threads[worker_id] = thread_to_activate;
+  }
+  thread_to_activate->activate();
+  return true;
+}
+
+void G1ConcurrentRefineThreadControl::worker_threads_do(ThreadClosure* tc) {
+  for (uint i = 0; i < _max_num_threads; i++) {
+    if (_threads[i] != nullptr) {
+      tc->do_thread(_threads[i]);
+    }
+  }
+}
+
+void G1ConcurrentRefineThreadControl::stop() {
+  for (uint i = 0; i < _max_num_threads; i++) {
+    if (_threads[i] != nullptr) {
+      _threads[i]->stop();
+    }
+  }
+}
 #endif /* AARCH64 */
 
 uint64_t G1ConcurrentRefine::adjust_threads_period_ms() const {
   // Instead of a fixed value, this could be a command line option.  But then
   // we might also want to allow configuration of adjust_threads_wait_ms().
-#ifndef AARCH64
-  return 50;
-#else /* AARCH64 */
+#ifdef AARCH64
   // Use a prime number close to 50ms, different to other components that derive
   // their wait time from the try_get_available_bytes_estimate() call to minimize
   // interference.
   return 53;
+#else /* AARCH64 */
+  return 50;
 #endif /* AARCH64 */
 }
 
-#ifndef AARCH64
-static size_t minimum_pending_cards_target() {
-  // One buffer per thread.
-  return ParallelGCThreads * G1UpdateBufferSize;
-}
-
-G1ConcurrentRefine::G1ConcurrentRefine(G1Policy* policy) :
-  _policy(policy),
-  _threads_wanted(0),
-  _pending_cards_target(PendingCardsTargetUninitialized),
-  _last_adjust(),
-  _needs_adjust(false),
-  _threads_needed(policy, adjust_threads_period_ms()),
-  _thread_control(),
-  _dcqs(G1BarrierSet::dirty_card_queue_set())
-{}
-
-jint G1ConcurrentRefine::initialize() {
-  return _thread_control.initialize(this, max_num_threads());
-}
-
-G1ConcurrentRefine* G1ConcurrentRefine::create(G1Policy* policy, jint* ecode) {
-  G1ConcurrentRefine* cr = new G1ConcurrentRefine(policy);
-  *ecode = cr->initialize();
-  if (*ecode != 0) {
-    delete cr;
-    cr = nullptr;
-  }
-  return cr;
-}
-#else /* AARCH64 */
+#ifdef AARCH64
 static size_t minimum_pending_cards_target() {
   return ParallelGCThreads * G1PerThreadPendingCardThreshold;
 }
@@ -613,6 +583,36 @@ G1ConcurrentRefine* G1ConcurrentRefine::create(G1CollectedHeap* g1h, jint* ecode
   }
   return cr;
 }
+#else /* AARCH64 */
+static size_t minimum_pending_cards_target() {
+  // One buffer per thread.
+  return ParallelGCThreads * G1UpdateBufferSize;
+}
+
+G1ConcurrentRefine::G1ConcurrentRefine(G1Policy* policy) :
+  _policy(policy),
+  _threads_wanted(0),
+  _pending_cards_target(PendingCardsTargetUninitialized),
+  _last_adjust(),
+  _needs_adjust(false),
+  _threads_needed(policy, adjust_threads_period_ms()),
+  _thread_control(),
+  _dcqs(G1BarrierSet::dirty_card_queue_set())
+{}
+
+jint G1ConcurrentRefine::initialize() {
+  return _thread_control.initialize(this, max_num_threads());
+}
+
+G1ConcurrentRefine* G1ConcurrentRefine::create(G1Policy* policy, jint* ecode) {
+  G1ConcurrentRefine* cr = new G1ConcurrentRefine(policy);
+  *ecode = cr->initialize();
+  if (*ecode != 0) {
+    delete cr;
+    cr = nullptr;
+  }
+  return cr;
+}
 #endif /* AARCH64 */
 
 void G1ConcurrentRefine::stop() {
@@ -622,15 +622,7 @@ void G1ConcurrentRefine::stop() {
 G1ConcurrentRefine::~G1ConcurrentRefine() {
 }
 
-#ifndef AARCH64
-void G1ConcurrentRefine::threads_do(ThreadClosure *tc) {
-  _thread_control.worker_threads_do(tc);
-}
-
-uint G1ConcurrentRefine::max_num_threads() {
-  return G1ConcRefinementThreads;
-}
-#else /* AARCH64 */
+#ifdef AARCH64
 void G1ConcurrentRefine::threads_do(ThreadClosure *tc) {
   worker_threads_do(tc);
   control_thread_do(tc);
@@ -643,39 +635,47 @@ void G1ConcurrentRefine::worker_threads_do(ThreadClosure *tc) {
 void G1ConcurrentRefine::control_thread_do(ThreadClosure *tc) {
   _thread_control.control_thread_do(tc);
 }
+#else /* AARCH64 */
+void G1ConcurrentRefine::threads_do(ThreadClosure *tc) {
+  _thread_control.worker_threads_do(tc);
+}
+
+uint G1ConcurrentRefine::max_num_threads() {
+  return G1ConcRefinementThreads;
+}
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+void G1ConcurrentRefine::update_pending_cards_target(double pending_cards_time_ms,
+                                                     size_t processed_pending_cards,
+#else /* AARCH64 */
 void G1ConcurrentRefine::update_pending_cards_target(double logged_cards_time_ms,
                                                      size_t processed_logged_cards,
                                                      size_t predicted_thread_buffer_cards,
-#else /* AARCH64 */
-void G1ConcurrentRefine::update_pending_cards_target(double pending_cards_time_ms,
-                                                     size_t processed_pending_cards,
 #endif /* AARCH64 */
                                                      double goal_ms) {
   size_t minimum = minimum_pending_cards_target();
-#ifndef AARCH64
-  if ((processed_logged_cards < minimum) || (logged_cards_time_ms == 0.0)) {
-    log_debug(gc, ergo, refine)("Unchanged pending cards target: %zu",
-                                _pending_cards_target);
-#else /* AARCH64 */
+#ifdef AARCH64
   if ((processed_pending_cards < minimum) || (pending_cards_time_ms == 0.0)) {
     log_debug(gc, ergo, refine)("Unchanged pending cards target: %zu (processed %zu minimum %zu time %1.2f)",
                                 _pending_cards_target, processed_pending_cards, minimum, pending_cards_time_ms);
+#else /* AARCH64 */
+  if ((processed_logged_cards < minimum) || (logged_cards_time_ms == 0.0)) {
+    log_debug(gc, ergo, refine)("Unchanged pending cards target: %zu",
+                                _pending_cards_target);
 #endif /* AARCH64 */
     return;
   }
 
   // Base the pending cards budget on the measured rate.
-#ifndef AARCH64
+#ifdef AARCH64
+  double rate = processed_pending_cards / pending_cards_time_ms;
+  size_t new_target = static_cast<size_t>(goal_ms * rate);
+#else /* AARCH64 */
   double rate = processed_logged_cards / logged_cards_time_ms;
   size_t budget = static_cast<size_t>(goal_ms * rate);
   // Deduct predicted cards in thread buffers to get target.
   size_t new_target = budget - MIN2(budget, predicted_thread_buffer_cards);
-#else /* AARCH64 */
-  double rate = processed_pending_cards / pending_cards_time_ms;
-  size_t new_target = static_cast<size_t>(goal_ms * rate);
 #endif /* AARCH64 */
   // Add some hysteresis with previous values.
   if (is_pending_cards_target_initialized()) {
@@ -687,33 +687,35 @@ void G1ConcurrentRefine::update_pending_cards_target(double pending_cards_time_m
   log_debug(gc, ergo, refine)("New pending cards target: %zu", new_target);
 }
 
-#ifndef AARCH64
+#ifdef AARCH64
+void G1ConcurrentRefine::adjust_after_gc(double pending_cards_time_ms,
+                                         size_t processed_pending_cards,
+#else /* AARCH64 */
 void G1ConcurrentRefine::adjust_after_gc(double logged_cards_time_ms,
                                          size_t processed_logged_cards,
                                          size_t predicted_thread_buffer_cards,
-#else /* AARCH64 */
-void G1ConcurrentRefine::adjust_after_gc(double pending_cards_time_ms,
-                                         size_t processed_pending_cards,
 #endif /* AARCH64 */
                                          double goal_ms) {
-#ifndef AARCH64
-  if (!G1UseConcRefinement) return;
-#else /* AARCH64 */
+#ifdef AARCH64
   if (!G1UseConcRefinement) {
     return;
   }
+#else /* AARCH64 */
+  if (!G1UseConcRefinement) return;
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+  update_pending_cards_target(pending_cards_time_ms,
+                              processed_pending_cards,
+#else /* AARCH64 */
   update_pending_cards_target(logged_cards_time_ms,
                               processed_logged_cards,
                               predicted_thread_buffer_cards,
-#else /* AARCH64 */
-  update_pending_cards_target(pending_cards_time_ms,
-                              processed_pending_cards,
 #endif /* AARCH64 */
                               goal_ms);
-#ifndef AARCH64
+#ifdef AARCH64
+  if (_thread_control.is_refinement_enabled()) {
+#else /* AARCH64 */
   if (_thread_control.max_num_threads() == 0) {
     // If no refinement threads then the mutator threshold is the target.
     _dcqs.set_mutator_refinement_threshold(_pending_cards_target);
@@ -723,15 +725,13 @@ void G1ConcurrentRefine::adjust_after_gc(double pending_cards_time_ms,
     // drastically, record that adjustment is needed and kick the primary
     // thread, in case it is waiting.
     _dcqs.set_mutator_refinement_threshold(SIZE_MAX);
-#else /* AARCH64 */
-  if (_thread_control.is_refinement_enabled()) {
 #endif /* AARCH64 */
     _needs_adjust = true;
     if (is_pending_cards_target_initialized()) {
-#ifndef AARCH64
-      _thread_control.activate(0);
-#else /* AARCH64 */
+#ifdef AARCH64
       _thread_control.activate();
+#else /* AARCH64 */
+      _thread_control.activate(0);
 #endif /* AARCH64 */
     }
   }
@@ -748,17 +748,13 @@ static uint64_t compute_adjust_wait_time_ms(double available_ms) {
 
 #endif /* ! AARCH64 */
 uint64_t G1ConcurrentRefine::adjust_threads_wait_ms() const {
-#ifndef AARCH64
-  assert_current_thread_is_primary_refinement_thread();
-#else /* AARCH64 */
+#ifdef AARCH64
   assert_current_thread_is_control_refinement_thread();
+#else /* AARCH64 */
+  assert_current_thread_is_primary_refinement_thread();
 #endif /* AARCH64 */
   if (is_pending_cards_target_initialized()) {
-#ifndef AARCH64
-    double available_ms = _threads_needed.predicted_time_until_next_gc_ms();
-    uint64_t wait_time_ms = compute_adjust_wait_time_ms(available_ms);
-    return MAX2(wait_time_ms, adjust_threads_period_ms());
-#else /* AARCH64 */
+#ifdef AARCH64
     // Retry asap when the cause for not getting a prediction was that we temporarily
     // did not get the heap lock. Otherwise we might wait for too long until we get
     // back here.
@@ -768,6 +764,10 @@ uint64_t G1ConcurrentRefine::adjust_threads_wait_ms() const {
     double available_time_ms = _threads_needed.predicted_time_until_next_gc_ms();
 
     return _policy->adjust_wait_time_ms(available_time_ms, adjust_threads_period_ms());
+#else /* AARCH64 */
+    double available_ms = _threads_needed.predicted_time_until_next_gc_ms();
+    uint64_t wait_time_ms = compute_adjust_wait_time_ms(available_ms);
+    return MAX2(wait_time_ms, adjust_threads_period_ms());
 #endif /* AARCH64 */
   } else {
     // If target not yet initialized then wait forever (until explicitly
@@ -777,7 +777,67 @@ uint64_t G1ConcurrentRefine::adjust_threads_wait_ms() const {
   }
 }
 
-#ifndef AARCH64
+#ifdef AARCH64
+bool G1ConcurrentRefine::adjust_num_threads_periodically() {
+  assert_current_thread_is_control_refinement_thread();
+
+  _heap_was_locked = false;
+  // Check whether it's time to do a periodic adjustment if there is no explicit
+  // request pending. We might have spuriously woken up.
+  if (!_needs_adjust) {
+    Tickspan since_adjust = Ticks::now() - _last_adjust;
+    if (since_adjust.milliseconds() < adjust_threads_period_ms()) {
+      _num_threads_wanted = 0;
+      return false;
+    }
+  }
+
+  // Reset pending request.
+  _needs_adjust = false;
+  size_t available_bytes = 0;
+  if (_policy->try_get_available_bytes_estimate(available_bytes)) {
+    adjust_threads_wanted(available_bytes);
+    _last_adjust = Ticks::now();
+  } else {
+    _heap_was_locked = true;
+    // Defer adjustment to next time.
+    _needs_adjust = true;
+  }
+
+  return (_num_threads_wanted > 0) && !heap_was_locked();
+}
+
+void G1ConcurrentRefine::adjust_threads_wanted(size_t available_bytes) {
+  assert_current_thread_is_control_refinement_thread();
+
+  G1Policy* policy = G1CollectedHeap::heap()->policy();
+  const G1Analytics* analytics = policy->analytics();
+  size_t num_cards = policy->current_pending_cards();
+
+  _threads_needed.update(_num_threads_wanted,
+                         available_bytes,
+                         num_cards,
+                         _pending_cards_target);
+  uint new_wanted = _threads_needed.threads_needed();
+  if (new_wanted > _thread_control.max_num_threads()) {
+    // Bound the wanted threads by maximum available.
+    new_wanted = _thread_control.max_num_threads();
+  }
+  _num_threads_wanted = new_wanted;
+
+  log_debug(gc, refine)("Concurrent refinement: wanted %u, pending cards: %zu (pending-from-gc %zu), "
+                        "predicted: %zu, goal %zu, time-until-next-gc: %1.2fms pred-refine-rate %1.2fc/ms log-rate %1.2fc/ms",
+                        new_wanted,
+                        num_cards,
+                        G1CollectedHeap::heap()->policy()->pending_cards_from_gc(),
+                        _threads_needed.predicted_cards_at_next_gc(),
+                        _pending_cards_target,
+                        _threads_needed.predicted_time_until_next_gc_ms(),
+                        analytics->predict_concurrent_refine_rate_ms(),
+                        analytics->predict_dirtied_cards_rate_ms()
+                        );
+}
+#else /* AARCH64 */
 class G1ConcurrentRefine::RemSetSamplingClosure : public HeapRegionClosure {
   G1CollectionSet* _cset;
   size_t _sampled_rs_length;
@@ -921,82 +981,22 @@ void G1ConcurrentRefine::reduce_threads_wanted() {
 bool G1ConcurrentRefine::is_thread_wanted(uint worker_id) const {
   return worker_id < Atomic::load(&_threads_wanted);
 }
-#else /* AARCH64 */
-bool G1ConcurrentRefine::adjust_num_threads_periodically() {
-  assert_current_thread_is_control_refinement_thread();
-
-  _heap_was_locked = false;
-  // Check whether it's time to do a periodic adjustment if there is no explicit
-  // request pending. We might have spuriously woken up.
-  if (!_needs_adjust) {
-    Tickspan since_adjust = Ticks::now() - _last_adjust;
-    if (since_adjust.milliseconds() < adjust_threads_period_ms()) {
-      _num_threads_wanted = 0;
-      return false;
-    }
-  }
-
-  // Reset pending request.
-  _needs_adjust = false;
-  size_t available_bytes = 0;
-  if (_policy->try_get_available_bytes_estimate(available_bytes)) {
-    adjust_threads_wanted(available_bytes);
-    _last_adjust = Ticks::now();
-  } else {
-    _heap_was_locked = true;
-    // Defer adjustment to next time.
-    _needs_adjust = true;
-  }
-
-  return (_num_threads_wanted > 0) && !heap_was_locked();
-}
-
-void G1ConcurrentRefine::adjust_threads_wanted(size_t available_bytes) {
-  assert_current_thread_is_control_refinement_thread();
-
-  G1Policy* policy = G1CollectedHeap::heap()->policy();
-  const G1Analytics* analytics = policy->analytics();
-  size_t num_cards = policy->current_pending_cards();
-
-  _threads_needed.update(_num_threads_wanted,
-                         available_bytes,
-                         num_cards,
-                         _pending_cards_target);
-  uint new_wanted = _threads_needed.threads_needed();
-  if (new_wanted > _thread_control.max_num_threads()) {
-    // Bound the wanted threads by maximum available.
-    new_wanted = _thread_control.max_num_threads();
-  }
-  _num_threads_wanted = new_wanted;
-
-  log_debug(gc, refine)("Concurrent refinement: wanted %u, pending cards: %zu (pending-from-gc %zu), "
-                        "predicted: %zu, goal %zu, time-until-next-gc: %1.2fms pred-refine-rate %1.2fc/ms log-rate %1.2fc/ms",
-                        new_wanted,
-                        num_cards,
-                        G1CollectedHeap::heap()->policy()->pending_cards_from_gc(),
-                        _threads_needed.predicted_cards_at_next_gc(),
-                        _pending_cards_target,
-                        _threads_needed.predicted_time_until_next_gc_ms(),
-                        analytics->predict_concurrent_refine_rate_ms(),
-                        analytics->predict_dirtied_cards_rate_ms()
-                        );
-}
 #endif /* AARCH64 */
 
 bool G1ConcurrentRefine::is_thread_adjustment_needed() const {
-#ifndef AARCH64
-  assert_current_thread_is_primary_refinement_thread();
-#else /* AARCH64 */
+#ifdef AARCH64
   assert_current_thread_is_control_refinement_thread();
+#else /* AARCH64 */
+  assert_current_thread_is_primary_refinement_thread();
 #endif /* AARCH64 */
   return _needs_adjust;
 }
 
 void G1ConcurrentRefine::record_thread_adjustment_needed() {
-#ifndef AARCH64
-  assert_current_thread_is_primary_refinement_thread();
-#else /* AARCH64 */
+#ifdef AARCH64
   assert_current_thread_is_control_refinement_thread();
+#else /* AARCH64 */
+  assert_current_thread_is_primary_refinement_thread();
 #endif /* AARCH64 */
   _needs_adjust = true;
 }

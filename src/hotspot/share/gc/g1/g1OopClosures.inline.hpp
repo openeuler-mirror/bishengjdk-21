@@ -90,19 +90,19 @@ inline void G1ScanEvacuatedObjClosure::do_oop_work(T* p) {
     prefetch_and_push(p, obj);
   } else if (!HeapRegion::is_in_same_region(p, obj)) {
     handle_non_cset_obj_common(region_attr, p, obj);
-#ifndef AARCH64
-    assert(_skip_card_enqueue != Uninitialized, "Scan location has not been initialized.");
-    if (_skip_card_enqueue == True) {
-#else /* AARCH64 */
+#ifdef AARCH64
     assert(_skip_card_mark != Uninitialized, "Scan location has not been initialized.");
     if (_skip_card_mark == True) {
+#else /* AARCH64 */
+    assert(_skip_card_enqueue != Uninitialized, "Scan location has not been initialized.");
+    if (_skip_card_enqueue == True) {
 #endif /* AARCH64 */
       return;
     }
-#ifndef AARCH64
-    _par_scan_state->enqueue_card_if_tracked(region_attr, p, obj);
-#else /* AARCH64 */
+#ifdef AARCH64
     _par_scan_state->mark_card_if_tracked(region_attr, p, obj);
+#else /* AARCH64 */
+    _par_scan_state->enqueue_card_if_tracked(region_attr, p, obj);
 #endif /* AARCH64 */
   }
 }
@@ -162,15 +162,15 @@ inline void G1ConcurrentRefineOopClosure::do_oop_work(T* p) {
     return;
   }
 
-#ifndef AARCH64
-  HeapRegionRemSet* to_rem_set = _g1h->heap_region_containing(obj)->rem_set();
-#else /* AARCH64 */
+#ifdef AARCH64
   HeapRegion* to_region = _g1h->heap_region_containing(obj);
   if (to_region->is_young()) {
     _has_ref_to_cset = true;
     return;
   }
   HeapRegionRemSet* to_rem_set = to_region->rem_set();
+#else /* AARCH64 */
+  HeapRegionRemSet* to_rem_set = _g1h->heap_region_containing(obj)->rem_set();
 #endif /* AARCH64 */
 
   assert(to_rem_set != nullptr, "Need per-region 'into' remsets.");
@@ -204,10 +204,10 @@ inline void G1ScanCardClosure::do_oop_work(T* p) {
     _heap_roots_found++;
   } else if (!HeapRegion::is_in_same_region(p, obj)) {
     handle_non_cset_obj_common(region_attr, p, obj);
-#ifndef AARCH64
-    _par_scan_state->enqueue_card_if_tracked(region_attr, p, obj);
-#else /* AARCH64 */
+#ifdef AARCH64
     _par_scan_state->mark_card_if_tracked(region_attr, p, obj);
+#else /* AARCH64 */
+    _par_scan_state->enqueue_card_if_tracked(region_attr, p, obj);
 #endif /* AARCH64 */
   }
 }
@@ -300,14 +300,14 @@ template <class T> void G1RebuildRemSetClosure::do_oop_work(T* p) {
   HeapRegion* to = _g1h->heap_region_containing(obj);
   HeapRegionRemSet* rem_set = to->rem_set();
   if (rem_set->is_tracked()) {
-#ifndef AARCH64
-    rem_set->add_reference(p, _worker_id);
-#else /* AARCH64 */
+#ifdef AARCH64
     if (to->is_young()) {
       G1BarrierSet::g1_barrier_set()->write_ref_field_post(p);
     } else {
       rem_set->add_reference(p, _worker_id);
     }
+#else /* AARCH64 */
+    rem_set->add_reference(p, _worker_id);
 #endif /* AARCH64 */
   }
 }

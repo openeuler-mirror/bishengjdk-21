@@ -39,36 +39,7 @@
 #include "memory/iterator.hpp"
 #include "runtime/javaThread.hpp"
 
-#ifndef AARCH64
-void G1RemSetSummary::update() {
-  class CollectData : public ThreadClosure {
-    G1RemSetSummary* _summary;
-    uint _counter;
-  public:
-    CollectData(G1RemSetSummary * summary) : _summary(summary),  _counter(0) {}
-    virtual void do_thread(Thread* t) {
-      G1ConcurrentRefineThread* crt = static_cast<G1ConcurrentRefineThread*>(t);
-      _summary->set_rs_thread_vtime(_counter, crt->vtime_accum());
-      _counter++;
-    }
-  } collector(this);
-
-  G1CollectedHeap* g1h = G1CollectedHeap::heap();
-  g1h->concurrent_refine()->threads_do(&collector);
-}
-
-void G1RemSetSummary::set_rs_thread_vtime(uint thread, double value) {
-  assert(_rs_threads_vtimes != nullptr, "just checking");
-  assert(thread < _num_vtimes, "just checking");
-  _rs_threads_vtimes[thread] = value;
-}
-
-double G1RemSetSummary::rs_thread_vtime(uint thread) const {
-  assert(_rs_threads_vtimes != nullptr, "just checking");
-  assert(thread < _num_vtimes, "just checking");
-  return _rs_threads_vtimes[thread];
-}
-#else /* AARCH64 */
+#ifdef AARCH64
 void G1RemSetSummary::update() {
   G1ConcurrentRefine* refine = G1CollectedHeap::heap()->concurrent_refine();
 
@@ -118,22 +89,51 @@ jlong G1RemSetSummary::worker_thread_cpu_time(uint thread) const {
 jlong G1RemSetSummary::control_thread_cpu_time() const {
   return _control_thread_cpu_time;
 }
+#else /* AARCH64 */
+void G1RemSetSummary::update() {
+  class CollectData : public ThreadClosure {
+    G1RemSetSummary* _summary;
+    uint _counter;
+  public:
+    CollectData(G1RemSetSummary * summary) : _summary(summary),  _counter(0) {}
+    virtual void do_thread(Thread* t) {
+      G1ConcurrentRefineThread* crt = static_cast<G1ConcurrentRefineThread*>(t);
+      _summary->set_rs_thread_vtime(_counter, crt->vtime_accum());
+      _counter++;
+    }
+  } collector(this);
+
+  G1CollectedHeap* g1h = G1CollectedHeap::heap();
+  g1h->concurrent_refine()->threads_do(&collector);
+}
+
+void G1RemSetSummary::set_rs_thread_vtime(uint thread, double value) {
+  assert(_rs_threads_vtimes != nullptr, "just checking");
+  assert(thread < _num_vtimes, "just checking");
+  _rs_threads_vtimes[thread] = value;
+}
+
+double G1RemSetSummary::rs_thread_vtime(uint thread) const {
+  assert(_rs_threads_vtimes != nullptr, "just checking");
+  assert(thread < _num_vtimes, "just checking");
+  return _rs_threads_vtimes[thread];
+}
 #endif /* AARCH64 */
 
 G1RemSetSummary::G1RemSetSummary(bool should_update) :
-#ifndef AARCH64
-  _num_vtimes(G1ConcurrentRefine::max_num_threads()),
-  _rs_threads_vtimes(NEW_C_HEAP_ARRAY(double, _num_vtimes, mtGC)) {
-#else /* AARCH64 */
+#ifdef AARCH64
   _num_worker_threads(G1ConcRefinementThreads),
   _worker_threads_cpu_times(NEW_C_HEAP_ARRAY(jlong, _num_worker_threads, mtGC)),
   _control_thread_cpu_time(0) {
+#else /* AARCH64 */
+  _num_vtimes(G1ConcurrentRefine::max_num_threads()),
+  _rs_threads_vtimes(NEW_C_HEAP_ARRAY(double, _num_vtimes, mtGC)) {
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  memset(_rs_threads_vtimes, 0, sizeof(double) * _num_vtimes);
-#else /* AARCH64 */
+#ifdef AARCH64
   memset(_worker_threads_cpu_times, 0, sizeof(jlong) * _num_worker_threads);
+#else /* AARCH64 */
+  memset(_rs_threads_vtimes, 0, sizeof(double) * _num_vtimes);
 #endif /* AARCH64 */
 
   if (should_update) {
@@ -142,43 +142,43 @@ G1RemSetSummary::G1RemSetSummary(bool should_update) :
 }
 
 G1RemSetSummary::~G1RemSetSummary() {
-#ifndef AARCH64
-  FREE_C_HEAP_ARRAY(double, _rs_threads_vtimes);
-#else /* AARCH64 */
+#ifdef AARCH64
   FREE_C_HEAP_ARRAY(jlong, _worker_threads_cpu_times);
+#else /* AARCH64 */
+  FREE_C_HEAP_ARRAY(double, _rs_threads_vtimes);
 #endif /* AARCH64 */
 }
 
 void G1RemSetSummary::set(G1RemSetSummary* other) {
   assert(other != nullptr, "just checking");
-#ifndef AARCH64
-  assert(_num_vtimes == other->_num_vtimes, "just checking");
-#else /* AARCH64 */
+#ifdef AARCH64
   assert(_num_worker_threads == other->_num_worker_threads, "just checking");
+#else /* AARCH64 */
+  assert(_num_vtimes == other->_num_vtimes, "just checking");
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  memcpy(_rs_threads_vtimes, other->_rs_threads_vtimes, sizeof(double) * _num_vtimes);
-#else /* AARCH64 */
+#ifdef AARCH64
   memcpy(_worker_threads_cpu_times, other->_worker_threads_cpu_times, sizeof(jlong) * _num_worker_threads);
   _control_thread_cpu_time = other->_control_thread_cpu_time;
+#else /* AARCH64 */
+  memcpy(_rs_threads_vtimes, other->_rs_threads_vtimes, sizeof(double) * _num_vtimes);
 #endif /* AARCH64 */
 }
 
 void G1RemSetSummary::subtract_from(G1RemSetSummary* other) {
   assert(other != nullptr, "just checking");
-#ifndef AARCH64
-  assert(_num_vtimes == other->_num_vtimes, "just checking");
-#else /* AARCH64 */
+#ifdef AARCH64
   assert(_num_worker_threads == other->_num_worker_threads, "just checking");
+#else /* AARCH64 */
+  assert(_num_vtimes == other->_num_vtimes, "just checking");
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  for (uint i = 0; i < _num_vtimes; i++) {
-    set_rs_thread_vtime(i, other->rs_thread_vtime(i) - rs_thread_vtime(i));
-#else /* AARCH64 */
+#ifdef AARCH64
   for (uint i = 0; i < _num_worker_threads; i++) {
     set_worker_thread_cpu_time(i, other->worker_thread_cpu_time(i) - worker_thread_cpu_time(i));
+#else /* AARCH64 */
+  for (uint i = 0; i < _num_vtimes; i++) {
+    set_rs_thread_vtime(i, other->rs_thread_vtime(i) - rs_thread_vtime(i));
 #endif /* AARCH64 */
   }
 #ifdef AARCH64
@@ -408,12 +408,12 @@ void G1RemSetSummary::print_on(outputStream* out, bool show_thread_times) {
     out->print_cr(" Control %5.2f Workers", (double)control_thread_cpu_time() / NANOSECS_PER_SEC);
 #endif /* AARCH64 */
     out->print("     ");
-#ifndef AARCH64
-    for (uint i = 0; i < _num_vtimes; i++) {
-      out->print("    %5.2f", rs_thread_vtime(i));
-#else /* AARCH64 */
+#ifdef AARCH64
     for (uint i = 0; i < _num_worker_threads; i++) {
       out->print("    %5.2f", (double)worker_thread_cpu_time(i) / NANOSECS_PER_SEC);
+#else /* AARCH64 */
+    for (uint i = 0; i < _num_vtimes; i++) {
+      out->print("    %5.2f", rs_thread_vtime(i));
 #endif /* AARCH64 */
     }
     out->cr();

@@ -33,12 +33,7 @@
 // Used for collecting per-thread statistics and for summaries over a
 // collection of threads.
 class G1ConcurrentRefineStats : public CHeapObj<mtGC> {
-#ifndef AARCH64
-  Tickspan _refinement_time;
-  size_t _refined_cards;
-  size_t _precleaned_cards;
-  size_t _dirtied_cards;
-#else /* AARCH64 */
+#ifdef AARCH64
   jlong _sweep_duration;              // Time spent sweeping the table finding non-clean cards
                                       // and refining them.
   jlong _yield_during_sweep_duration; // Time spent yielding during the sweep (not doing the sweep).
@@ -51,33 +46,35 @@ class G1ConcurrentRefineStats : public CHeapObj<mtGC> {
   size_t _cards_no_cross_region;      // Number of dirty cards that were dirtied, but then cleaned again by the mutator.
 
   jlong _refine_duration;             // Time spent during actual refinement.
+#else /* AARCH64 */
+  Tickspan _refinement_time;
+  size_t _refined_cards;
+  size_t _precleaned_cards;
+  size_t _dirtied_cards;
 #endif /* AARCH64 */
 
 public:
   G1ConcurrentRefineStats();
 
-#ifndef AARCH64
-  // Time spent performing concurrent refinement.
-  Tickspan refinement_time() const { return _refinement_time; }
-#else /* AARCH64 */
+#ifdef AARCH64
   // Time spent performing sweeping the refinement table (includes actual refinement,
   // but not yield time).
   jlong sweep_duration() const { return _sweep_duration - _yield_during_sweep_duration; }
   jlong yield_during_sweep_duration() const { return _yield_during_sweep_duration; }
   jlong refine_duration() const { return _refine_duration; }
+#else /* AARCH64 */
+  // Time spent performing concurrent refinement.
+  Tickspan refinement_time() const { return _refinement_time; }
 #endif /* AARCH64 */
 
   // Number of refined cards.
-#ifndef AARCH64
-  size_t refined_cards() const { return _refined_cards; }
-#else /* AARCH64 */
+#ifdef AARCH64
   size_t refined_cards() const { return cards_not_clean(); }
+#else /* AARCH64 */
+  size_t refined_cards() const { return _refined_cards; }
 #endif /* AARCH64 */
 
-#ifndef AARCH64
-  // Refinement rate, in cards per ms.
-  double refinement_rate_ms() const;
-#else /* AARCH64 */
+#ifdef AARCH64
   size_t cards_scanned() const { return _cards_scanned; }
   size_t cards_clean() const { return _cards_clean; }
   size_t cards_not_clean() const { return _cards_scanned - _cards_clean; }
@@ -101,9 +98,14 @@ public:
   void inc_cards_already_refer_to_cset() { _cards_already_refer_to_cset++; }
   void inc_cards_refer_to_cset() { _cards_refer_to_cset++; }
   void inc_cards_no_cross_region() { _cards_no_cross_region++; }
+#else /* AARCH64 */
+  // Refinement rate, in cards per ms.
+  double refinement_rate_ms() const;
 #endif /* AARCH64 */
 
-#ifndef AARCH64
+#ifdef AARCH64
+  void add_atomic(G1ConcurrentRefineStats* other);
+#else /* AARCH64 */
   // Number of cards for which refinement was skipped because some other
   // thread had already refined them.
   size_t precleaned_cards() const { return _precleaned_cards; }
@@ -128,8 +130,6 @@ public:
                                            const G1ConcurrentRefineStats& y) {
     return x -= y;
   }
-#else /* AARCH64 */
-  void add_atomic(G1ConcurrentRefineStats* other);
 #endif /* AARCH64 */
 
   void reset();
