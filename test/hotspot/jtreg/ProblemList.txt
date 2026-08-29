@@ -112,6 +112,8 @@ gc/stress/TestStressG1Humongous.java 8286554 windows-x64
 
 # :hotspot_runtime
 
+runtime/cds/appcds/jigsaw/modulepath/MainModuleOnly.java 8316969 generic-all
+runtime/cds/appcds/jigsaw/modulepath/OptimizeModuleHandlingTest.java 8316969 generic-all
 runtime/jni/terminatedThread/TestTerminatedThread.java 8317789 aix-ppc64
 runtime/handshake/HandshakeSuspendExitTest.java 8294313 generic-all
 runtime/os/TestTracePageSizes.java#no-options 8267460 linux-aarch64
