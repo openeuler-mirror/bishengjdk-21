@@ -1284,7 +1284,8 @@ static Handle bytecode_enhancement_protection_domain(Handle class_loader, const 
   args.push_oop(class_loader);
   args.push_oop(Handle());
   TempNewSymbol pd_signature = SymbolTable::new_symbol("(Ljava/security/CodeSource;Ljava/security/PermissionCollection;Ljava/lang/ClassLoader;[Ljava/security/Principal;)V");
-  return JavaCalls::construct_new_instance(vmClasses::ProtectionDomain_klass(), pd_signature, &args, CHECK_NH);
+  Handle enhancement_handle = JavaCalls::construct_new_instance(vmClasses::ProtectionDomain_klass(), pd_signature, &args, CHECK_NH);
+  return enhancement_handle;
 }
 
 static void restore_bytecode_enhancement_saved_exception(Handle saved_exception, const char* saved_exception_file,
