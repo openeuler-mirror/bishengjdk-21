@@ -274,6 +274,7 @@ public:
   size_t ptrmap_size_in_bits()             const { return _ptrmap_size_in_bits; }
   bool compressed_oops()                   const { return _compressed_oops; }
   bool compressed_class_pointers()         const { return _compressed_class_ptrs; }
+  bool has_full_module_graph()             const { return _use_full_module_graph; }
   // FIXME: These should really return int
   jshort max_used_path_index()             const { return _max_used_path_index; }
   jshort app_module_paths_start_index()    const { return _app_module_paths_start_index; }
@@ -543,6 +544,7 @@ public:
                     GrowableArray<const char*>* rp_array,
                     unsigned int dumptime_prefix_len,
                     unsigned int runtime_prefix_len) NOT_CDS_RETURN_(false);
+  void  extract_module_paths(const char* runtime_path, GrowableArray<const char*>* module_paths);
   bool  validate_boot_class_paths() NOT_CDS_RETURN_(false);
   bool  validate_app_class_paths(int shared_app_paths_len) NOT_CDS_RETURN_(false);
   bool  map_heap_region_impl() NOT_CDS_JAVA_HEAP_RETURN_(false);
