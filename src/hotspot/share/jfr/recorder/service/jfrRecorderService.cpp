@@ -528,6 +528,7 @@ void JfrRecorderService::rotate(int msgs) {
     return;
   }
   if (msgs & MSGBIT(MSG_VM_ERROR)) {
+    stop();
     vm_error_rotation();
     return;
   }
