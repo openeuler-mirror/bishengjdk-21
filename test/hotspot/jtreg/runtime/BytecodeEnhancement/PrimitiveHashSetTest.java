@@ -36,16 +36,16 @@ import jdk.test.lib.process.ProcessTools;
 public class PrimitiveHashSetTest {
     private static final String PRIMITIVE_HASH_SET_FIELD = "primitiveHashSet";
     private static final String[] PRIMITIVE_HASH_SET_CLASSES = {
-            "java.util.HashSet$PrimitiveHashSet",
-            "java.util.HashSet$PrimitiveHashSet$1",
-            "java.util.HashSet$LongHashSet",
-            "java.util.HashSet$LongHashSet$LongIterator",
-            "java.util.HashSet$LongHashSet$LongSpliterator",
-            "java.util.HashSet$LongHashSet$LongArrayList",
-            "java.util.HashSet$IntHashSet",
-            "java.util.HashSet$IntHashSet$IntIterator",
-            "java.util.HashSet$IntHashSet$IntSpliterator",
-            "java.util.HashSet$IntHashSet$IntArrayList"
+            "java.util.PrimitiveHashSet",
+            "java.util.PrimitiveHashSet$1",
+            "java.util.LongHashSet",
+            "java.util.LongHashSet$LongIterator",
+            "java.util.LongHashSet$LongSpliterator",
+            "java.util.LongHashSet$LongArrayList",
+            "java.util.IntHashSet",
+            "java.util.IntHashSet$IntIterator",
+            "java.util.IntHashSet$IntSpliterator",
+            "java.util.IntHashSet$IntArrayList"
     };
 
     public static void main(String[] args) throws Exception {
@@ -87,9 +87,10 @@ public class PrimitiveHashSetTest {
             }
             if (expected) {
                 int modifiers = primitiveHashSetClass.getModifiers();
-                if (!Modifier.isPrivate(modifiers) || !Modifier.isStatic(modifiers)
-                        || !Modifier.isAbstract(modifiers)) {
-                    throw new RuntimeException("HashSet.PrimitiveHashSet must be private static abstract");
+                if (!Modifier.isAbstract(modifiers) || Modifier.isPublic(modifiers)
+                        || Modifier.isProtected(modifiers) || Modifier.isPrivate(modifiers)
+                        || Modifier.isStatic(modifiers)) {
+                    throw new RuntimeException("PrimitiveHashSet must be package-private abstract");
                 }
                 if (field.getType() != primitiveHashSetClass || !Modifier.isTransient(field.getModifiers())
                         || Modifier.isPublic(field.getModifiers())) {

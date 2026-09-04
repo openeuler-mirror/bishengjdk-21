@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -71,6 +72,7 @@ public class PrimitiveHashSetBehaviorTest {
         specializedIteratorRemoval();
         randomizedDifferential();
         streamOperations();
+        failedSpecializationFallsBack();
     }
 
     private static void constructors() {
@@ -158,6 +160,8 @@ public class PrimitiveHashSetBehaviorTest {
 
         Iterator<Long> failFast = set.iterator();
         set.add(10_000L);
+        assertTrue(failFast.hasNext());
+        assertThrows(IllegalStateException.class, failFast::remove);
         assertThrows(ConcurrentModificationException.class, failFast::next);
 
         HashSet<Long> empty = new HashSet<>();
@@ -532,7 +536,8 @@ public class PrimitiveHashSetBehaviorTest {
 
         Iterator<Number> beforeRollback = set.iterator();
         set.add(3.14d);
-        assertThrows(ConcurrentModificationException.class, beforeRollback::hasNext);
+        assertTrue(beforeRollback.hasNext());
+        assertThrows(ConcurrentModificationException.class, beforeRollback::next);
 
         HashSet<Number> values = new HashSet<>();
         values.add(null);
@@ -581,6 +586,60 @@ public class PrimitiveHashSetBehaviorTest {
                 Long.MAX_VALUE)));
         assertEquals(set.size(), set.parallelStream().count());
         assertEquals(set, set.parallelStream().collect(Collectors.toSet()));
+    }
+
+    private static void failedSpecializationFallsBack() throws Exception {
+        failedSpecializationFallsBack(true);
+        failedSpecializationFallsBack(false);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void failedSpecializationFallsBack(boolean useLongs) throws Exception {
+        Field mapField = HashSet.class.getDeclaredField("map");
+        Field primitiveSetField = HashSet.class.getDeclaredField("primitiveHashSet");
+        Field candidateStateField = HashSet.class.getDeclaredField("primitiveCandidateState");
+        mapField.setAccessible(true);
+        primitiveSetField.setAccessible(true);
+        candidateStateField.setAccessible(true);
+
+        HashSet<Number> set = new HashSet<>();
+        FailingIterationHashMap<Number, Object> map = new FailingIterationHashMap<>();
+        for (int i = 0; i < 100; i++) {
+            map.put(useLongs ? Long.valueOf(i) : Integer.valueOf(i), new Object());
+        }
+        mapField.set(set, map);
+        candidateStateField.setInt(set, useLongs ? 1 : 2);
+
+        Number added = useLongs ? Long.valueOf(100) : Integer.valueOf(100);
+        assertTrue(set.add(added));
+        assertSame(map, mapField.get(set));
+        assertNull(primitiveSetField.get(set));
+        assertEquals(-1, candidateStateField.getInt(set));
+        assertTrue(set.contains(added));
+
+        Number next = useLongs ? Long.valueOf(101) : Integer.valueOf(101);
+        assertTrue(set.add(next));
+        assertSame(map, mapField.get(set));
+        assertNull(primitiveSetField.get(set));
+        assertTrue(set.contains(next));
+    }
+
+    private static final class FailingIterationHashMap<K, V> extends HashMap<K, V> {
+        @Override
+        public Set<K> keySet() {
+            Set<K> keys = super.keySet();
+            return new java.util.AbstractSet<>() {
+                @Override
+                public Iterator<K> iterator() {
+                    throw new ConcurrentModificationException();
+                }
+
+                @Override
+                public int size() {
+                    return keys.size();
+                }
+            };
+        }
     }
 
     private static void randomizedDifferential() {
