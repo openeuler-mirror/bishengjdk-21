@@ -723,16 +723,16 @@ void BytecodeEnhancement::initialize() {
   _owner_class_loaders = new (mtClass) BytecodeEnhancementOwnerTable();
   if (UsePrimitiveHashSet) {
     add_internal_class_replacement("java/util/HashSet", 0xf477dc75U);
-    add_internal_class_addition("java/util/HashSet$PrimitiveHashSet", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$PrimitiveHashSet$1", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$LongHashSet", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$LongHashSet$LongIterator", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$LongHashSet$LongSpliterator", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$LongHashSet$LongArrayList", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$IntHashSet", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$IntHashSet$IntIterator", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$IntHashSet$IntSpliterator", BuiltinLoader::BootLoader);
-    add_internal_class_addition("java/util/HashSet$IntHashSet$IntArrayList", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/PrimitiveHashSet", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/PrimitiveHashSet$1", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/LongHashSet", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/LongHashSet$LongIterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/LongHashSet$LongSpliterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/LongHashSet$LongArrayList", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/IntHashSet", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/IntHashSet$IntIterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/IntHashSet$IntSpliterator", BuiltinLoader::BootLoader);
+    add_internal_class_addition("java/util/IntHashSet$IntArrayList", BuiltinLoader::BootLoader);
   }
   if (BytecodeEnhancementPaths != nullptr) {
     GrowableArray<ClassPathEntry*> path_entries;

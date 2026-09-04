@@ -284,12 +284,6 @@ bool SystemDictionaryShared::is_hidden_lambda_proxy(InstanceKlass* ik) {
 }
 
 bool SystemDictionaryShared::check_for_exclusion_impl(InstanceKlass* k) {
-#ifdef AARCH64
-  // Bytecode enhancement candidates should not be dumped into CDS.
-  if (BytecodeEnhancement::is_enabled() && BytecodeEnhancement::should_bypass_cds(k->name())) {
-    return warn_excluded(k, "Bytecode enhancement candidate");
-  }
-#endif
   if (k->is_in_error_state()) {
     return warn_excluded(k, "In error state");
   }
@@ -348,6 +342,15 @@ bool SystemDictionaryShared::check_for_exclusion_impl(InstanceKlass* k) {
     log_info(cds)("Skipping %s: used only when dumping CDS archive", k->name()->as_C_string());
     return true;
   }
+
+#ifdef AARCH64
+  // Bytecode enhancement candidates should not be dumped into CDS.
+  if (BytecodeEnhancement::is_enabled() && BytecodeEnhancement::should_bypass_cds(k->name())) {
+    ResourceMark rm;
+    log_info(cds)("Skipping %s: Bytecode enhancement candidate", k->name()->as_C_string());
+    return true;
+  }
+#endif
 
   InstanceKlass* super = k->java_super();
   if (super != nullptr && check_for_exclusion(super, nullptr)) {
