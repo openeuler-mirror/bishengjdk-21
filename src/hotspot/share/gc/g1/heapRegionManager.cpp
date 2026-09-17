@@ -610,6 +610,11 @@ uint HeapRegionManager::find_highest_free(bool* expanded) {
       *expanded = true;
       return curr;
     }
+    if (hr == nullptr) {
+      // Dynamic max heap cap exhausted: this region cannot be committed,
+      // keep scanning lower indices for a committed free one.
+      continue;
+    }
     if (hr->is_free()) {
       *expanded = false;
       return curr;
@@ -631,7 +636,9 @@ bool HeapRegionManager::allocate_containing_regions(MemRegion range, size_t* com
       expand_exact(curr_index, 1, pretouch_workers);
     }
     HeapRegion* curr_region  = _regions.get_by_index(curr_index);
-    if (!curr_region->is_free()) {
+    if (curr_region == nullptr || !curr_region->is_free()) {
+      // A null curr_region means the dynamic max heap cap was exhausted
+      // before this region could be committed: fail gracefully.
       return false;
     }
   }
