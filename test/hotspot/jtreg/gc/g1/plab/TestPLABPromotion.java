@@ -55,7 +55,7 @@ import jdk.test.whitebox.WhiteBox;
  */
 public class TestPLABPromotion {
 
-    private static final boolean COMPACT_HEADERS = Platform.is64bit() && WhiteBox.getWhiteBox().getBooleanVMFlag("UseCompactObjectHeaders");
+    private static final boolean COMPACT_HEADERS = Platform.isAArch64() && WhiteBox.getWhiteBox().getBooleanVMFlag("UseCompactObjectHeaders");
 
     // GC ID with survivor PLAB statistics
     private final static long GC_ID_SURVIVOR_STATS = 1l;
