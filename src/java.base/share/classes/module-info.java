@@ -274,6 +274,7 @@ module java.base {
         jdk.random;
     exports jdk.internal.util to
         java.desktop,
+        java.net.http,
         java.prefs,
         java.security.jgss,
         java.smartcardio,
@@ -329,6 +330,7 @@ module java.base {
         jdk.crypto.kaeprovider,
         jdk.crypto.cryptoki;
     exports sun.security.jca to
+        java.security.sasl,
         java.smartcardio,
         jdk.crypto.ec,
         jdk.crypto.cryptoki,
