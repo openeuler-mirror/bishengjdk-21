@@ -215,11 +215,13 @@ public final class KeyUtil {
      */
     public static final String fullDisplayAlgName(Key key, java.util.ResourceBundle rb) {
         String result = key.getAlgorithm();
-        if (key instanceof ECKey) {
-            ECParameterSpec paramSpec = ((ECKey) key).getParams();
+        if (key instanceof PrivateKey || key instanceof PublicKey) {
+            AlgorithmParameterSpec paramSpec = getParams(key);
             if (paramSpec instanceof NamedCurve nc) {
                 result += " (" + nc.getNameAndAliases()[0] + ")";
-            } else if (paramSpec.getClass().getSimpleName().equals("KAENamedCurve")) {
+            } else if (paramSpec instanceof NamedParameterSpec nps) {
+                result = nps.getName();
+            } else if (paramSpec != null && paramSpec.getClass().getSimpleName().equals("KAENamedCurve")) {
                 try {
                     Field na = paramSpec.getClass().getDeclaredField("nameAndAliases");
                     na.setAccessible(true);
@@ -248,11 +250,6 @@ public final class KeyUtil {
                     }
                 }
             }
-        } else {
-            // Follow upstream (JDK-8340327): show the parameter set name
-            // (X25519/X448, Ed25519/Ed448) instead of the generic algorithm
-            // name for keys with a NamedParameterSpec.
-            return fullDisplayAlgName(key);
         }
         return result;
     }
