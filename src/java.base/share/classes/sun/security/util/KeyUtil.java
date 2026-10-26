@@ -248,8 +248,11 @@ public final class KeyUtil {
                     }
                 }
             }
-        } else if (key instanceof EdECKey) {
-            result = ((EdECKey) key).getParams().getName();
+        } else {
+            // Follow upstream (JDK-8340327): show the parameter set name
+            // (X25519/X448, Ed25519/Ed448) instead of the generic algorithm
+            // name for keys with a NamedParameterSpec.
+            return fullDisplayAlgName(key);
         }
         return result;
     }
