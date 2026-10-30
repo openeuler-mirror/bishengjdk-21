@@ -2135,6 +2135,8 @@ public final class System {
                 case "sun.nio.PageAlignDirectMemory":
                     // used by java.lang.Integer.IntegerCache
                 case "java.lang.Integer.IntegerCache.high":
+                    // used by java.lang.Integer.IntegerStringCache
+                case "java.lang.Integer.IntegerStringCache.threshold":
                     // used by sun.launcher.LauncherHelper
                 case "sun.java.launcher.diag":
                     // used by jdk.internal.loader.ClassLoaders

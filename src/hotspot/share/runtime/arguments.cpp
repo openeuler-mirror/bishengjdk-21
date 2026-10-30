@@ -1863,6 +1863,21 @@ jint Arguments::set_aggressive_opts_flags() {
   }
 #endif
 
+  // Publish the effective String cache threshold after all command-line options.
+  // Always publish zero when disabled so a -D property cannot enable the cache.
+  intx integer_string_cache_threshold = 0;
+#ifdef AARCH64
+  if (UseIntegerToStringCache) {
+    integer_string_cache_threshold = IntegerToStringCacheThreshold;
+  }
+#endif
+  char buffer[128];
+  jio_snprintf(buffer, sizeof(buffer), "java.lang.Integer.IntegerStringCache.threshold=" INTX_FORMAT,
+               integer_string_cache_threshold);
+  if (!add_property(buffer)) {
+    return JNI_ENOMEM;
+  }
+
   return JNI_OK;
 }
 

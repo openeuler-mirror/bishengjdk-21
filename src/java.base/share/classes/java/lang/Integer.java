@@ -441,6 +441,42 @@ public final class Integer extends Number
         } ;
 
 
+    private static final class IntegerStringCache {
+        static final int low = 0;
+        static final int high;
+
+        @Stable
+        static final String[] cache;
+
+        static {
+            int threshold = 0;
+            String thresholdProperty =
+                VM.getSavedProperty("java.lang.Integer.IntegerStringCache.threshold");
+            if (thresholdProperty != null) {
+                try {
+                    threshold = Math.max(parseInt(thresholdProperty), 0);
+                } catch (NumberFormatException nfe) {
+                    // Ignore malformed properties, leaving the cache disabled.
+                }
+            }
+            high = threshold - 1;
+            int size = (high - low) + 1;
+            String[] c = new String[size];
+            int j = low;
+            // Fill directly rather than recursing through Integer.toString.
+            for (int i = 0; i < size; i++) {
+                int value = j++;
+                int length = stringSize(value);
+                byte[] digits = new byte[length];
+                getChars(value, length, digits);
+                c[i] = new String(digits, LATIN1);
+            }
+            cache = c;
+        }
+
+        private IntegerStringCache() {}
+    }
+
     /**
      * Returns a {@code String} object representing the
      * specified integer. The argument is converted to signed decimal
@@ -450,9 +486,20 @@ public final class Integer extends Number
      *
      * @param   i   an integer to be converted.
      * @return  a string representation of the argument in base&nbsp;10.
+     * @implNote
+     * On AArch64, with compact strings and {@code -XX:+UseIntegerToStringCache} enabled,
+     * strings for nonnegative values less than
+     * {@code -XX:IntegerToStringCacheThreshold} are cached and shared between
+     * invocations. The cache is disabled by default; its default threshold is 128.
      */
     @IntrinsicCandidate
     public static String toString(int i) {
+        // System saves the private startup properties before publishing init level 1.
+        // Earlier formatting must not initialize the cache holder.
+        if (COMPACT_STRINGS && i >= IntegerStringCache.low && VM.initLevel() >= 1 &&
+                i <= IntegerStringCache.high) {
+            return IntegerStringCache.cache[i + (-IntegerStringCache.low)];
+        }
         int size = stringSize(i);
         if (COMPACT_STRINGS) {
             byte[] buf = new byte[size];

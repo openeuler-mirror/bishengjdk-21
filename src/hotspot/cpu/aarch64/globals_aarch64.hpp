@@ -294,6 +294,15 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
   product(ccstr, NUMABindPolicy, nullptr,                               \
           "Enable deterministic NUMA placement with combined Options,"  \
           "including prefix=<id> and div=<N>.")                         \
+  product(bool, UseIntegerToStringCache, false,                         \
+          "Cache String objects for small nonnegative "                 \
+          "Integer.toString arguments when CompactStrings is enabled")  \
+                                                                        \
+  product(intx, IntegerToStringCacheThreshold, 128,                     \
+          "Exclusive upper bound of the Integer.toString cache; "       \
+          "zero disables caching")                                      \
+          range(0, max_jint)                                            \
+                                                                        \
   product(bool, UseUTFConversionIntrinsics, false,                      \
           "Use Intrinsics for conversion between UTF8 and UTF16")       \
   product(ccstr, AutoSharedArchivePath, nullptr,                        \
