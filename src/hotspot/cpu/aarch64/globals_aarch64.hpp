@@ -303,6 +303,15 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
           "zero disables caching")                                      \
           range(0, max_jint)                                            \
                                                                         \
+  product(bool, UseLongToStringCache, false,                            \
+          "Cache String objects for small nonnegative "                 \
+          "Long.toString arguments when CompactStrings is enabled")     \
+                                                                        \
+  product(intx, LongToStringCacheThreshold, 128,                        \
+          "Exclusive upper bound of the Long.toString cache; "          \
+          "zero disables caching")                                      \
+          range(0, max_jint)                                            \
+                                                                        \
   product(bool, UseUTFConversionIntrinsics, false,                      \
           "Use Intrinsics for conversion between UTF8 and UTF16")       \
   product(ccstr, AutoSharedArchivePath, nullptr,                        \

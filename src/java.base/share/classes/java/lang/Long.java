@@ -34,6 +34,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import jdk.internal.misc.CDS;
+import jdk.internal.misc.VM;
 import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 import jdk.internal.vm.annotation.Stable;
@@ -478,6 +479,42 @@ public final class Long extends Number
         }
     }
 
+    private static final class LongStringCache {
+        static final int low = 0;
+        static final int high;
+
+        @Stable
+        static final String[] cache;
+
+        static {
+            int threshold = 0;
+            String thresholdProperty =
+                VM.getSavedProperty("java.lang.Long.LongStringCache.threshold");
+            if (thresholdProperty != null) {
+                try {
+                    threshold = Math.max(Integer.parseInt(thresholdProperty), 0);
+                } catch (NumberFormatException nfe) {
+                    // Ignore malformed properties, leaving the cache disabled.
+                }
+            }
+            high = threshold - 1;
+            int size = (high - low) + 1;
+            String[] c = new String[size];
+            long j = low;
+            // Fill directly rather than recursing through Long.toString.
+            for (int i = 0; i < size; i++) {
+                long value = j++;
+                int length = stringSize(value);
+                byte[] digits = new byte[length];
+                getChars(value, length, digits);
+                c[i] = new String(digits, LATIN1);
+            }
+            cache = c;
+        }
+
+        private LongStringCache() {}
+    }
+
     /**
      * Returns a {@code String} object representing the specified
      * {@code long}.  The argument is converted to signed decimal
@@ -487,8 +524,23 @@ public final class Long extends Number
      *
      * @param   i   a {@code long} to be converted.
      * @return  a string representation of the argument in base&nbsp;10.
+     * @implNote
+     * On AArch64, with compact strings and {@code -XX:+UseLongToStringCache} enabled,
+     * strings for nonnegative values less than
+     * {@code -XX:LongToStringCacheThreshold} are cached and shared between
+     * invocations. The cache is disabled by default; its default threshold is 128.
      */
     public static String toString(long i) {
+        // System saves the private startup properties before publishing init level 1.
+        // Earlier formatting must not initialize the cache holder.
+        if (COMPACT_STRINGS && i >= LongStringCache.low && VM.initLevel() >= 1 &&
+                i <= LongStringCache.high) {
+            // Integer initialization can reenter while this holder is being filled.
+            String[] cache = LongStringCache.cache;
+            if (cache != null) {
+                return cache[(int) i + (-LongStringCache.low)];
+            }
+        }
         int size = stringSize(i);
         if (COMPACT_STRINGS) {
             byte[] buf = new byte[size];

@@ -2137,6 +2137,8 @@ public final class System {
                 case "java.lang.Integer.IntegerCache.high":
                     // used by java.lang.Integer.IntegerStringCache
                 case "java.lang.Integer.IntegerStringCache.threshold":
+                    // used by java.lang.Long.LongStringCache
+                case "java.lang.Long.LongStringCache.threshold":
                     // used by sun.launcher.LauncherHelper
                 case "sun.java.launcher.diag":
                     // used by jdk.internal.loader.ClassLoaders
