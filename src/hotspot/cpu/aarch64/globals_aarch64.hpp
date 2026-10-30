@@ -312,6 +312,9 @@ constexpr uint string_case_backend_value(StringCaseBackend backend) {
           "zero disables caching")                                      \
           range(0, max_jint)                                            \
                                                                         \
+  product(bool, UseIntegerToHexStringIntrinsic, false,                  \
+          "Use the intrinsic for eight-digit Integer hex formatting")   \
+                                                                        \
   product(bool, UseUTFConversionIntrinsics, false,                      \
           "Use Intrinsics for conversion between UTF8 and UTF16")       \
   product(ccstr, AutoSharedArchivePath, nullptr,                        \

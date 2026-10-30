@@ -511,6 +511,13 @@ bool vmIntrinsics::disabled_by_jvm_flags(vmIntrinsics::ID id) {
   case vmIntrinsics::_poly1305_processBlocks:
     if (!UsePoly1305Intrinsics) return true;
     break;
+  case vmIntrinsics::_formatHex8:
+#ifdef AARCH64
+    if (!UseIntegerToHexStringIntrinsic) return true;
+    break;
+#else
+    return true;
+#endif
   case vmIntrinsics::_updateBytesCRC32C:
   case vmIntrinsics::_updateDirectByteBufferCRC32C:
     if (!UseCRC32CIntrinsics) return true;

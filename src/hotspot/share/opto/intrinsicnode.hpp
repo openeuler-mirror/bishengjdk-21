@@ -234,6 +234,17 @@ class DecodeUtf8ToUtf16Node: public Node {
   virtual const Type* Value(PhaseGVN* phase) const;
 };
 
+//------------------------------FormatHex8Node-----------------------------------
+// Convert an int to eight lowercase ASCII hex bytes, packed in a long so that
+// a little-endian store writes the most significant hex digit first.
+class FormatHex8Node : public Node {
+public:
+  FormatHex8Node(Node* value) : Node(nullptr, value) {}
+  virtual int Opcode() const;
+  virtual const Type* bottom_type() const { return TypeLong::LONG; }
+  virtual uint ideal_reg() const { return Op_RegL; }
+};
+
 //-------------------------------DigitNode----------------------------------------
 class DigitNode : public Node {
 public:

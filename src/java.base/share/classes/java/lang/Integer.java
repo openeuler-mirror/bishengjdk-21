@@ -365,13 +365,26 @@ public final class Integer extends Number
         int chars = Math.max(((mag + (shift - 1)) / shift), 1);
         if (COMPACT_STRINGS) {
             byte[] buf = new byte[chars];
-            formatUnsignedInt(val, shift, buf, chars);
+            if (shift == 4 && chars == 8) {
+                formatHex8(val, buf);
+            } else {
+                formatUnsignedInt(val, shift, buf, chars);
+            }
             return new String(buf, LATIN1);
         } else {
             byte[] buf = new byte[chars * 2];
             formatUnsignedIntUTF16(val, shift, buf, chars);
             return new String(buf, UTF16);
         }
+    }
+
+    /**
+     * Write exactly eight lowercase hexadecimal digits to the start of a
+     * Latin1 buffer, padding with leading zeroes when necessary.
+     */
+    @IntrinsicCandidate
+    private static void formatHex8(int val, byte[] buf) {
+        formatUnsignedInt(val, 4, buf, 8);
     }
 
     /**

@@ -561,6 +561,8 @@ bool LibraryCallKit::try_to_inline(int predicate) {
   case vmIntrinsics::_reverseBytes_s:
   case vmIntrinsics::_reverseBytes_c:           return inline_number_methods(intrinsic_id());
 
+  case vmIntrinsics::_formatHex8:               return inline_format_hex8();
+
   case vmIntrinsics::_compress_i:
   case vmIntrinsics::_compress_l:
   case vmIntrinsics::_expand_i:
@@ -2220,6 +2222,57 @@ bool LibraryCallKit::inline_number_methods(vmIntrinsics::ID id) {
   default:  fatal_unexpected_iid(id);  break;
   }
   set_result(_gvn.transform(n));
+  return true;
+}
+
+//--------------------------inline_format_hex8-----------------------------------
+// private static void Integer.formatHex8(int val, byte[] buf)
+bool LibraryCallKit::inline_format_hex8() {
+  if (too_many_traps(Deoptimization::Reason_intrinsic)) {
+    return false;
+  }
+
+  Node* val = argument(0);
+  Node* buf = argument(1);
+
+  {
+    // Reexecute the helper so its Java body owns the exceptional cases.
+    PreserveReexecuteState preexecs(this);
+    jvms()->set_should_reexecute(true);
+
+    RegionNode* bailout = new RegionNode(1);
+    record_for_igvn(bailout);
+
+    Node* null_ctl = top();
+    buf = null_check_oop(buf, &null_ctl);
+    if (null_ctl != top()) {
+      bailout->add_req(null_ctl);
+    }
+    if (!stopped()) {
+      generate_limit_guard(intcon(0), intcon(8), load_array_length(buf), bailout);
+    }
+
+    if (bailout->req() > 1) {
+      Node* bailout_ctl = _gvn.transform(bailout);
+      if (bailout_ctl != top()) {
+        PreserveJVMState pjvms(this);
+        set_control(bailout_ctl);
+        uncommon_trap(Deoptimization::Reason_intrinsic,
+                      Deoptimization::Action_maybe_recompile);
+      }
+    }
+    if (stopped()) {
+      return true;
+    }
+  }
+
+  Node* packed = _gvn.transform(new FormatHex8Node(val));
+  Node* adr = array_element_address(buf, intcon(0), T_BYTE);
+  const TypePtr* adr_type = _gvn.type(adr)->is_ptr();
+  int adr_idx = C->get_alias_index(adr_type);
+  // Mark the wide byte[] access as mismatched and unaligned.
+  store_to_memory(control(), adr, packed, T_LONG, adr_idx, MemNode::unordered,
+                  false /* require_atomic_access */, true /* unaligned */, true /* mismatched */);
   return true;
 }
 

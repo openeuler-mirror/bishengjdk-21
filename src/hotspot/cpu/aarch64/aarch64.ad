@@ -1761,6 +1761,16 @@ int ConstantTable::calculate_table_base_offset() const {
   return 0;  // absolute addressing, no offset
 }
 
+static GrowableArray<jvalue>* format_hex8_table() {
+  GrowableArray<jvalue>* table = new GrowableArray<jvalue>(2);
+  jvalue value;
+  value.j = 0x3736353433323130LL;
+  table->append(value);
+  value.j = 0x6665646362613938LL;
+  table->append(value);
+  return table;
+}
+
 bool MachConstantBaseNode::requires_postalloc_expand() const { return false; }
 void MachConstantBaseNode::postalloc_expand(GrowableArray <Node *> *nodes, PhaseRegAlloc *ra_) {
   ShouldNotReachHere();
@@ -2358,6 +2368,8 @@ const bool Matcher::match_rule_supported(int opcode) {
 
   bool ret_value = true;
   switch (opcode) {
+    case Op_FormatHex8:
+      return VM_Version::supports_asimd();
     case Op_OnSpinWait:
       return VM_Version::supports_on_spin_wait();
     case Op_CacheWB:
@@ -8362,6 +8374,55 @@ instruct countTrailingZerosL(iRegINoSp dst, iRegL src) %{
   %}
 
   ins_pipe(ialu_reg);
+%}
+
+//---------- Fixed-width hexadecimal conversion -------------------------------
+
+instruct formatHex8(iRegLNoSp dst, iRegIorL2I src,
+                    vecX low, vecX high, vecX table) %{
+  predicate(Matcher::match_rule_supported(Op_FormatHex8));
+  match(Set dst (FormatHex8 src));
+  effect(TEMP low, TEMP high, TEMP table);
+  ins_cost(INSN_COST * 11);
+
+  format %{ "formatHex8 $dst, $src # SIMD; TEMP $low $high $table" %}
+  ins_encode %{
+    // Capture the input before using dst as a temporary.  dst and src may
+    // overlap; DUP of 32-bit lanes also ignores any garbage in src's upper half.
+    __ dup($low$$FloatRegister, __ T2S, $src$$Register);
+
+    // Load the immutable 16-byte table "0123456789abcdef" from this nmethod's
+    // constant section.  Keep ADRP and ADD together for internal relocation;
+    // a direct ADRP/LDRQ pair has a different immediate scale.
+    // Use the constant section's eight-byte alignment; LDRQ permits unaligned
+    // loads, and stronger entry alignment would add unaccounted buffer padding.
+    InternalAddress table_addr = $constantaddress(T_LONG, format_hex8_table(), 8);
+    uint64_t offset;
+    __ adrp($dst$$Register, table_addr, offset);
+    __ add($dst$$Register, $dst$$Register, offset);
+    __ ldrq($table$$FloatRegister, Address($dst$$Register));
+
+    __ rev32($low$$FloatRegister, __ T8B, $low$$FloatRegister);
+    __ ushr($high$$FloatRegister, __ T8B, $low$$FloatRegister, 4);
+    if (UseSVE > 0) {
+      // SVE1 supplies an immediate nibble mask for the fixed-width NEON
+      // conversion.  Only low's first eight byte lanes are consumed below.
+      __ sve_and($low$$FloatRegister, __ B, (uint64_t)0x0f);
+    } else {
+      __ shl($low$$FloatRegister, __ T8B, $low$$FloatRegister, 4);
+      __ ushr($low$$FloatRegister, __ T8B, $low$$FloatRegister, 4);
+    }
+    __ zip1($low$$FloatRegister, __ T8B,
+            $high$$FloatRegister, $low$$FloatRegister);
+
+    // The low eight result lanes contain the output, e.g. 0x1234abcd becomes
+    // 0x6463626134333231.  The separate StoreL writes exactly eight bytes.
+    __ tbl($low$$FloatRegister, __ T8B,
+           $table$$FloatRegister, 1, $low$$FloatRegister);
+    __ mov($dst$$Register, $low$$FloatRegister, __ D, 0);
+  %}
+
+  ins_pipe(pipe_slow);
 %}
 
 //---------- Population Count Instructions -------------------------------------
