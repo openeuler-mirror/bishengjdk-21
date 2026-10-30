@@ -84,6 +84,8 @@ public:
 
   JitProfileCacheState flush_recorder();
 
+  void remove_method_from_recorder(Method* method);
+
   // static Symbol* get_class_loader_name(ClassLoaderData* cls);
 
   bool profilecacheComplete;

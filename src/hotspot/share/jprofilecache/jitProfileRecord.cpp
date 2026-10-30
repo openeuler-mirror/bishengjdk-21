@@ -635,3 +635,28 @@ bool JitProfileRecorder::flush_record() {
   log_info(jprofilecache)("[JitProfileCache] Profile information output completed. File: %s", logfile_name());
   return true;
 }
+
+void JitProfileRecorder::remove_method(Method* method) {
+  MutexLocker mu(JitProfileRecorder_lock, Mutex::_no_safepoint_check_flag);
+  if (!is_valid()) {
+    return;
+  }
+  unsigned int method_hash = compute_hash(method);
+  int index = dict()->hash_to_index(method_hash);
+  JitProfileRecorderEntry* prev = nullptr;
+  for (JitProfileRecorderEntry* entry = dict()->bucket(index);
+       entry != nullptr;
+       entry = entry->next()) {
+    if (entry->literal() == method) {
+      if (prev != nullptr) {
+        prev->set_next(entry->next());
+      } else {
+        dict()->set_entry(index, entry->next());
+      }
+      dict()->remove_entry(entry);
+      log_debug(jprofilecache)("[JitProfileCache] Removed stale method during class redefinition: %p", method);
+      break;
+    }
+    prev = entry;
+  }
+}

@@ -131,6 +131,12 @@ JitProfileCache::JitProfileCacheState JitProfileCache::flush_recorder() {
   return _jit_profile_cache_state;
 }
 
+void JitProfileCache::remove_method_from_recorder(Method* method) {
+  if (_jit_profile_cache_recorder != nullptr) {
+    _jit_profile_cache_recorder->remove_method(method);
+  }
+}
+
 #define PRELOAD_CLASS_HS_SIZE    10240
 
 JitProfileCacheInfo::JitProfileCacheInfo()
