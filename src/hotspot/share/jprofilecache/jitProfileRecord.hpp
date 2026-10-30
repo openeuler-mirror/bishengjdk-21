@@ -69,6 +69,11 @@ public:
 
     void free_entry(JitProfileRecorderEntry* entry);
 
+    void remove_entry(JitProfileRecorderEntry* entry) {
+          free_entry(entry);
+          _count--;
+    }
+
     unsigned int count() { return _count; }
 
     void print();
@@ -162,6 +167,8 @@ public:
     class_init_list()                    { return _class_init_list; }
 
     void add_method(Method* method, int method_bci);
+
+    void remove_method(Method* method);
 
     bool flush_record();
 

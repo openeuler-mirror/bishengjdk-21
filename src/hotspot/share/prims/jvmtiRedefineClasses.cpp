@@ -63,6 +63,9 @@
 #include "runtime/safepointVerifiers.hpp"
 #include "utilities/bitMap.inline.hpp"
 #include "utilities/events.hpp"
+#ifdef AARCH64
+#include "jprofilecache/jitProfileCache.hpp"
+#endif
 
 Array<Method*>* VM_RedefineClasses::_old_methods = nullptr;
 Array<Method*>* VM_RedefineClasses::_new_methods = nullptr;
@@ -4468,6 +4471,21 @@ void VM_RedefineClasses::redefine_single_class(Thread* current, jclass the_jclas
 
   }
   _timer_rsc_phase2.stop();
+
+#ifdef AARCH64
+  // Class redefinition makes old Method* obsolete. JitProfileRecorder holds raw
+  // Method* pointers that will become dangling once clean_deallocate_lists()
+  // frees them. Remove each redefined class's old methods from the recorder
+  // before the deallocation happens.
+  if (JProfilingCacheRecording) {
+    JitProfileCache* jpc = JitProfileCache::instance();
+    if (jpc != nullptr && _old_methods != nullptr) {
+      for (int i = 0; i < _old_methods->length(); i++) {
+        jpc->remove_method_from_recorder(_old_methods->at(i));
+      }
+    }
+  }
+#endif
 
 } // end redefine_single_class()
 
