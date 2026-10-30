@@ -454,34 +454,40 @@ public final class Integer extends Number
         } ;
 
 
+    /**
+     * The VM injects the effective cache flag after class initialization.
+     * Assign the default here so this is not a compile-time constant.
+     */
+    private static final boolean USE_TO_STRING_CACHE;
+
+    static {
+        USE_TO_STRING_CACHE = false;
+    }
+
     private static final class IntegerStringCache {
-        static final int low = 0;
-        static final int high;
+        static final int threshold;
 
         @Stable
         static final String[] cache;
 
         static {
-            int threshold = 0;
+            int cacheThreshold = 0;
             String thresholdProperty =
                 VM.getSavedProperty("java.lang.Integer.IntegerStringCache.threshold");
             if (thresholdProperty != null) {
                 try {
-                    threshold = Math.max(parseInt(thresholdProperty), 0);
+                    cacheThreshold = Math.max(parseInt(thresholdProperty), 0);
                 } catch (NumberFormatException nfe) {
                     // Ignore malformed properties, leaving the cache disabled.
                 }
             }
-            high = threshold - 1;
-            int size = (high - low) + 1;
-            String[] c = new String[size];
-            int j = low;
+            threshold = cacheThreshold;
+            String[] c = new String[threshold];
             // Fill directly rather than recursing through Integer.toString.
-            for (int i = 0; i < size; i++) {
-                int value = j++;
-                int length = stringSize(value);
+            for (int i = 0; i < threshold; i++) {
+                int length = stringSize(i);
                 byte[] digits = new byte[length];
-                getChars(value, length, digits);
+                getChars(i, length, digits);
                 c[i] = new String(digits, LATIN1);
             }
             cache = c;
@@ -507,11 +513,10 @@ public final class Integer extends Number
      */
     @IntrinsicCandidate
     public static String toString(int i) {
-        // System saves the private startup properties before publishing init level 1.
-        // Earlier formatting must not initialize the cache holder.
-        if (COMPACT_STRINGS && i >= IntegerStringCache.low && VM.initLevel() >= 1 &&
-                i <= IntegerStringCache.high) {
-            return IntegerStringCache.cache[i + (-IntegerStringCache.low)];
+        if (USE_TO_STRING_CACHE && COMPACT_STRINGS &&
+                i >= 0 &&
+                i < IntegerStringCache.threshold) {
+            return IntegerStringCache.cache[i];
         }
         int size = stringSize(i);
         if (COMPACT_STRINGS) {

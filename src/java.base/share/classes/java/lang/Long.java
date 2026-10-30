@@ -479,34 +479,40 @@ public final class Long extends Number
         }
     }
 
+    /**
+     * The VM injects the effective cache flag after class initialization.
+     * Assign the default here so this is not a compile-time constant.
+     */
+    private static final boolean USE_TO_STRING_CACHE;
+
+    static {
+        USE_TO_STRING_CACHE = false;
+    }
+
     private static final class LongStringCache {
-        static final int low = 0;
-        static final int high;
+        static final int threshold;
 
         @Stable
         static final String[] cache;
 
         static {
-            int threshold = 0;
+            int cacheThreshold = 0;
             String thresholdProperty =
                 VM.getSavedProperty("java.lang.Long.LongStringCache.threshold");
             if (thresholdProperty != null) {
                 try {
-                    threshold = Math.max(Integer.parseInt(thresholdProperty), 0);
+                    cacheThreshold = Math.max(Integer.parseInt(thresholdProperty), 0);
                 } catch (NumberFormatException nfe) {
                     // Ignore malformed properties, leaving the cache disabled.
                 }
             }
-            high = threshold - 1;
-            int size = (high - low) + 1;
-            String[] c = new String[size];
-            long j = low;
+            threshold = cacheThreshold;
+            String[] c = new String[threshold];
             // Fill directly rather than recursing through Long.toString.
-            for (int i = 0; i < size; i++) {
-                long value = j++;
-                int length = stringSize(value);
+            for (int i = 0; i < threshold; i++) {
+                int length = stringSize(i);
                 byte[] digits = new byte[length];
-                getChars(value, length, digits);
+                getChars(i, length, digits);
                 c[i] = new String(digits, LATIN1);
             }
             cache = c;
@@ -531,14 +537,13 @@ public final class Long extends Number
      * invocations. The cache is disabled by default; its default threshold is 128.
      */
     public static String toString(long i) {
-        // System saves the private startup properties before publishing init level 1.
-        // Earlier formatting must not initialize the cache holder.
-        if (COMPACT_STRINGS && i >= LongStringCache.low && VM.initLevel() >= 1 &&
-                i <= LongStringCache.high) {
+        if (USE_TO_STRING_CACHE && COMPACT_STRINGS &&
+                i >= 0 &&
+                i < LongStringCache.threshold) {
             // Integer initialization can reenter while this holder is being filled.
             String[] cache = LongStringCache.cache;
             if (cache != null) {
-                return cache[(int) i + (-LongStringCache.low)];
+                return cache[(int) i];
             }
         }
         int size = stringSize(i);

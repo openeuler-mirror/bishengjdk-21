@@ -4985,6 +4985,34 @@ void java_lang_Integer_IntegerCache::serialize_offsets(SerializeClosure* f) {
 #endif
 #undef INTEGER_CACHE_FIELDS_DO
 
+#ifdef AARCH64
+class ToStringCacheFixup : public FieldClosure {
+private:
+  InstanceKlass* _klass;
+  bool _value;
+
+public:
+  ToStringCacheFixup(InstanceKlass* klass, bool value) : _klass(klass), _value(value) {
+    assert(klass->is_initialized(), "class must be initialized before cache flag injection");
+  }
+
+  void do_field(fieldDescriptor* fd) {
+    if (fd->name() == vmSymbols::use_to_string_cache_name()) {
+      assert(fd->field_holder() == _klass, "Unexpected field holder");
+      oop mirror = _klass->java_mirror();
+      assert(mirror != nullptr, "Class must have mirror already");
+      mirror->bool_field_put(fd->offset(), _value);
+    }
+  }
+};
+
+void java_lang_Integer::set_to_string_cache(bool value) {
+  InstanceKlass* klass = vmClasses::Integer_klass();
+  ToStringCacheFixup fix(klass, value);
+  klass->do_local_static_fields(&fix);
+}
+#endif // AARCH64
+
 jint java_lang_Integer::value(oop obj) {
    jvalue v;
    java_lang_boxing_object::get_value(obj, &v);
@@ -5014,6 +5042,14 @@ void java_lang_Long_LongCache::serialize_offsets(SerializeClosure* f) {
 }
 #endif
 #undef LONG_CACHE_FIELDS_DO
+
+#ifdef AARCH64
+void java_lang_Long::set_to_string_cache(bool value) {
+  InstanceKlass* klass = vmClasses::Long_klass();
+  ToStringCacheFixup fix(klass, value);
+  klass->do_local_static_fields(&fix);
+}
+#endif // AARCH64
 
 jlong java_lang_Long::value(oop obj) {
    jvalue v;
