@@ -69,10 +69,7 @@ public:
 
     void free_entry(JitProfileRecorderEntry* entry);
 
-    void remove_entry(JitProfileRecorderEntry* entry) {
-          free_entry(entry);
-          _count--;
-    }
+    void remove_entry(JitProfileRecorderEntry* entry);
 
     unsigned int count() { return _count; }
 
