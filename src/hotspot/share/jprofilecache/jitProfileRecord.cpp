@@ -277,6 +277,13 @@ void JitProfileRecordDictionary::free_entry(JitProfileRecorderEntry* entry) {
   Hashtable<Method*, mtInternal>::free_entry(entry);
 }
 
+void JitProfileRecordDictionary::remove_entry(JitProfileRecorderEntry* entry) {
+  assert_lock_strong(JitProfileRecorder_lock);
+  assert(_count > 0, "entry count underflow");
+  free_entry(entry);
+  _count--;
+}
+
 #define WRITE_U1_INTERVAL 1
 #define WRITE_U4_INTERVAL 4
 #define OVERWRITE_U4_INTERVAL 4
