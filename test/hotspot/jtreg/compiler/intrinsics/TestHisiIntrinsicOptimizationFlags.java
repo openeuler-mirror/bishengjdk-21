@@ -55,6 +55,7 @@ public class TestHisiIntrinsicOptimizationFlags {
     private static final String[] CONTROLLED_FLAGS = {
             "UseSIMDForStringEquals",
             "UseUTFConversionIntrinsics",
+            "UseIntegerToHexStringIntrinsic",
             "UseStlrForRelease",
             "UseSVEHashCodeIntrinsic",
             "UseStreamPrefetchForArrayCopy",
@@ -66,6 +67,7 @@ public class TestHisiIntrinsicOptimizationFlags {
             "-XX:+UseSIMDForArrayEquals",
             "-XX:+UseSIMDForStringEquals",
             "-XX:+UseUTFConversionIntrinsics",
+            "-XX:+UseIntegerToHexStringIntrinsic",
             "-XX:+UseStlrForRelease",
             "-XX:+UseVectorizedHashCodeIntrinsic",
             "-XX:+UseSVEHashCodeIntrinsic",
@@ -223,6 +225,8 @@ public class TestHisiIntrinsicOptimizationFlags {
                 context + ": string equals flag");
         expectFlag(output, "UseUTFConversionIntrinsics", cpu.isHiSilicon(),
                 context + ": UTF conversion flag");
+        expectFlag(output, "UseIntegerToHexStringIntrinsic", cpu.isHiSilicon(),
+                context + ": Integer hex formatting flag");
         expectFlag(output, "UseStlrForRelease", cpu.isHiSilicon(),
                 context + ": stlr release flag");
         expectFlag(output, "UseSVEHashCodeIntrinsic",

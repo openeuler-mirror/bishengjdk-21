@@ -365,13 +365,26 @@ public final class Integer extends Number
         int chars = Math.max(((mag + (shift - 1)) / shift), 1);
         if (COMPACT_STRINGS) {
             byte[] buf = new byte[chars];
-            formatUnsignedInt(val, shift, buf, chars);
+            if (shift == 4 && chars == 8) {
+                formatHex8(val, buf);
+            } else {
+                formatUnsignedInt(val, shift, buf, chars);
+            }
             return new String(buf, LATIN1);
         } else {
             byte[] buf = new byte[chars * 2];
             formatUnsignedIntUTF16(val, shift, buf, chars);
             return new String(buf, UTF16);
         }
+    }
+
+    /**
+     * Write exactly eight lowercase hexadecimal digits to the start of a
+     * Latin1 buffer, padding with leading zeroes when necessary.
+     */
+    @IntrinsicCandidate
+    private static void formatHex8(int val, byte[] buf) {
+        formatUnsignedInt(val, 4, buf, 8);
     }
 
     /**
@@ -442,6 +455,48 @@ public final class Integer extends Number
 
 
     /**
+     * The VM injects the effective cache flag after class initialization.
+     * Assign the default here so this is not a compile-time constant.
+     */
+    private static final boolean USE_TO_STRING_CACHE;
+
+    static {
+        USE_TO_STRING_CACHE = false;
+    }
+
+    private static final class IntegerStringCache {
+        static final int threshold;
+
+        @Stable
+        static final String[] cache;
+
+        static {
+            int cacheThreshold = 0;
+            String thresholdProperty =
+                VM.getSavedProperty("java.lang.Integer.IntegerStringCache.threshold");
+            if (thresholdProperty != null) {
+                try {
+                    cacheThreshold = Math.max(parseInt(thresholdProperty), 0);
+                } catch (NumberFormatException nfe) {
+                    // Ignore malformed properties, leaving the cache disabled.
+                }
+            }
+            threshold = cacheThreshold;
+            String[] c = new String[threshold];
+            // Fill directly rather than recursing through Integer.toString.
+            for (int i = 0; i < threshold; i++) {
+                int length = stringSize(i);
+                byte[] digits = new byte[length];
+                getChars(i, length, digits);
+                c[i] = new String(digits, LATIN1);
+            }
+            cache = c;
+        }
+
+        private IntegerStringCache() {}
+    }
+
+    /**
      * Returns a {@code String} object representing the
      * specified integer. The argument is converted to signed decimal
      * representation and returned as a string, exactly as if the
@@ -450,9 +505,19 @@ public final class Integer extends Number
      *
      * @param   i   an integer to be converted.
      * @return  a string representation of the argument in base&nbsp;10.
+     * @implNote
+     * On AArch64, with compact strings and {@code -XX:+UseIntegerToStringCache} enabled,
+     * strings for nonnegative values less than
+     * {@code -XX:IntegerToStringCacheThreshold} are cached and shared between
+     * invocations. The cache is disabled by default; its default threshold is 128.
      */
     @IntrinsicCandidate
     public static String toString(int i) {
+        if (USE_TO_STRING_CACHE && COMPACT_STRINGS &&
+                i >= 0 &&
+                i < IntegerStringCache.threshold) {
+            return IntegerStringCache.cache[i];
+        }
         int size = stringSize(i);
         if (COMPACT_STRINGS) {
             byte[] buf = new byte[size];

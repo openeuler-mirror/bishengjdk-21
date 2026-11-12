@@ -260,6 +260,9 @@ bool C2Compiler::is_intrinsic_supported(const methodHandle& method) {
   case vmIntrinsics::_countPositives:
     if (!Matcher::match_rule_supported(Op_CountPositives))  return false;
     break;
+  case vmIntrinsics::_formatHex8:
+    if (!Matcher::match_rule_supported(Op_FormatHex8)) return false;
+    break;
   case vmIntrinsics::_bitCount_i:
     if (!Matcher::match_rule_supported(Op_PopCountI)) return false;
     break;

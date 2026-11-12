@@ -366,6 +366,17 @@ void Threads::initialize_java_lang_classes(JavaThread* main_thread, TRAPS) {
   initialize_class(vmSymbols::java_lang_System(), CHECK);
   // The VM creates & returns objects of this class. Make sure it's initialized.
   initialize_class(vmSymbols::java_lang_Class(), CHECK);
+
+#ifdef AARCH64
+  // Inject after the owning classes initialize and before the compilers start.
+  initialize_class(vmSymbols::java_lang_Integer(), CHECK);
+  java_lang_Integer::set_to_string_cache(
+      UseIntegerToStringCache && IntegerToStringCacheThreshold > 0 && CompactStrings);
+  initialize_class(vmSymbols::java_lang_Long(), CHECK);
+  java_lang_Long::set_to_string_cache(
+      UseLongToStringCache && LongToStringCacheThreshold > 0 && CompactStrings);
+#endif // AARCH64
+
   initialize_class(vmSymbols::java_lang_ThreadGroup(), CHECK);
   Handle thread_group = create_initial_thread_group(CHECK);
   Universe::set_main_thread_group(thread_group());

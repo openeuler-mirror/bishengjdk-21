@@ -737,6 +737,7 @@ void VM_Version::initialize() {
 
       ENABLE_HISI_FLAG_BY_DEFAULT(UseSIMDForStringEquals);
       ENABLE_HISI_FLAG_BY_DEFAULT(UseUTFConversionIntrinsics);
+      ENABLE_HISI_FLAG_BY_DEFAULT(UseIntegerToHexStringIntrinsic);
       ENABLE_HISI_FLAG_BY_DEFAULT(UseStlrForRelease);
     }
 
@@ -780,6 +781,7 @@ void VM_Version::initialize() {
     DISABLE_HISI_FLAG(UseHisiOptimizations);
     DISABLE_HISI_FLAG(UseSIMDForStringEquals);
     DISABLE_HISI_FLAG(UseUTFConversionIntrinsics);
+    DISABLE_HISI_FLAG(UseIntegerToHexStringIntrinsic);
     DISABLE_HISI_FLAG(UseStlrForRelease);
     DISABLE_HISI_FLAG(UseSVEHashCodeIntrinsic);
     DISABLE_HISI_FLAG(UseStringEqualsIgnoreCaseIntrinsic);

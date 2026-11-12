@@ -248,6 +248,10 @@ class methodHandle;
   do_intrinsic(_numberOfTrailingZeros_i,  java_lang_Integer,      numberOfTrailingZeros_name,int_int_signature,  F_S)   \
   do_intrinsic(_numberOfTrailingZeros_l,  java_lang_Long,         numberOfTrailingZeros_name,long_int_signature, F_S)   \
                                                                                                                         \
+  do_intrinsic(_formatHex8,               java_lang_Integer,      formatHex8_name,           formatHex8_signature, F_S) \
+   do_name(     formatHex8_name,                                  "formatHex8")                                         \
+   do_signature(formatHex8_signature,                             "(I[B)V")                                             \
+                                                                                                                        \
   do_intrinsic(_bitCount_i,               java_lang_Integer,      bitCount_name,            int_int_signature,   F_S)   \
   do_intrinsic(_bitCount_l,               java_lang_Long,         bitCount_name,            long_int_signature,  F_S)   \
   do_intrinsic(_compress_i,               java_lang_Integer,      compress_name,            int2_int_signature,   F_S)  \

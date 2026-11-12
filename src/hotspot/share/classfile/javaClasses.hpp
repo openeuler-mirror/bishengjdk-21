@@ -1741,11 +1741,17 @@ class vector_VectorPayload : AllStatic {
 class java_lang_Integer : AllStatic {
 public:
   static jint value(oop obj);
+#ifdef AARCH64
+  static void set_to_string_cache(bool value);
+#endif // AARCH64
 };
 
 class java_lang_Long : AllStatic {
 public:
   static jlong value(oop obj);
+#ifdef AARCH64
+  static void set_to_string_cache(bool value);
+#endif // AARCH64
 };
 
 class java_lang_Character : AllStatic {
