@@ -237,11 +237,15 @@ public final class String
      */
     static final boolean STRING_EQUALS_IGNORE_CASE_INTRINSICS;
 
+    // Minimum number of UTF-16 code units for the intrinsic, set by the VM.
+    static final int STRING_EQUALS_IGNORE_CASE_MIN_LENGTH;
+
     static {
         COMPACT_STRINGS = true;
         UTF_CONVERSION_INTRINSICS = false;
         STRING_CASE_INTRINSICS = false;
         STRING_EQUALS_IGNORE_CASE_INTRINSICS = false;
+        STRING_EQUALS_IGNORE_CASE_MIN_LENGTH = 0;
     }
 
     /**

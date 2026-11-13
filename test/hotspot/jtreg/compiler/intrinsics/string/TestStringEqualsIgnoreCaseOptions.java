@@ -92,6 +92,16 @@ public class TestStringEqualsIgnoreCaseOptions {
                 "-XX:UseSVE=0", enableFlag(false), minLengthFlag(0));
         expectState(disabled, false, 0, 0);
 
+        State minZero = runSuccess("explicit-on-min-zero",
+                "-XX:UseSVE=1", enableFlag(true), minLengthFlag(0));
+        expectState(minZero, minZero.hisilicon() && minZero.sve(),
+                minZero.useSVE(), 0);
+
+        State min32 = runSuccess("explicit-on-min-32",
+                "-XX:UseSVE=1", enableFlag(true), minLengthFlag(32));
+        expectState(min32, min32.hisilicon() && min32.sve(),
+                min32.useSVE(), 32);
+
         State noSVE = runSuccess("explicit-on-no-sve",
                 "-XX:UseSVE=0", enableFlag(true));
         expectState(noSVE, false, 0, DEFAULT_MIN_LENGTH);
@@ -163,7 +173,7 @@ public class TestStringEqualsIgnoreCaseOptions {
         long useSVE = uintFlag(wb, "UseSVE");
         long maxVectorSize = intxFlag(wb, "MaxVectorSize");
         long minLength = intFlag(wb, MIN_LENGTH_FLAG);
-        checkInjectedConfiguration(enabled);
+        checkInjectedConfiguration(enabled, minLength);
         String cpuInfo = wb.getCPUFeatures();
         Set<String> features = featureSet(cpuInfo);
         System.out.println("EIIC_STATE"
@@ -176,13 +186,18 @@ public class TestStringEqualsIgnoreCaseOptions {
                 + "|hisilicon=" + isHiSilicon(cpuInfo));
     }
 
-    private static void checkInjectedConfiguration(boolean enabled) {
+    private static void checkInjectedConfiguration(boolean enabled, long minLength) {
         try {
             Field enabledField = String.class.getDeclaredField(
                     "STRING_EQUALS_IGNORE_CASE_INTRINSICS");
             enabledField.setAccessible(true);
             checkEquals("injected intrinsic state", enabled,
                     enabledField.getBoolean(null));
+            Field minLengthField = String.class.getDeclaredField(
+                    "STRING_EQUALS_IGNORE_CASE_MIN_LENGTH");
+            minLengthField.setAccessible(true);
+            checkEquals("injected intrinsic minimum length", minLength,
+                    minLengthField.getInt(null));
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("missing injected equalsIgnoreCase"
                     + " configuration", e);

@@ -291,10 +291,16 @@ void java_lang_String::set_string_case_intrinsics(bool value) {
   vmClasses::String_klass()->do_local_static_fields(&fix);
 }
 
-void java_lang_String::set_string_equals_ignore_case_intrinsics(bool value) {
+void java_lang_String::set_string_equals_ignore_case_intrinsics(bool enabled, int min_length) {
   StringIntrinsicsFixup enabled_fix(
-      vmSymbols::string_equals_ignore_case_intrinsics_name(), value);
-  vmClasses::String_klass()->do_local_static_fields(&enabled_fix);
+      vmSymbols::string_equals_ignore_case_intrinsics_name(), enabled);
+  InstanceKlass* klass = vmClasses::String_klass();
+  klass->do_local_static_fields(&enabled_fix);
+
+  int offset;
+  JavaClasses::compute_offset(offset, klass, vmSymbols::string_equals_ignore_case_min_length_name(),
+                              vmSymbols::int_signature(), true);
+  klass->java_mirror()->int_field_put(offset, min_length);
 }
 #endif // AARCH64
 

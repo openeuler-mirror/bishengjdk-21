@@ -964,7 +964,8 @@ final class StringUTF16 {
 
     public static boolean regionMatchesCI(byte[] value, int toffset,
                                           byte[] other, int ooffset, int len) {
-        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS) {
+        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS
+                || len < String.STRING_EQUALS_IGNORE_CASE_MIN_LENGTH) {
             return compareToCIImpl(value, toffset, len,
                     other, ooffset, len) == 0;
         }

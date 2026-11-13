@@ -386,7 +386,8 @@ final class StringLatin1 {
     // case insensitive
     public static boolean regionMatchesCI(byte[] value, int toffset,
                                           byte[] other, int ooffset, int len) {
-        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS) {
+        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS
+                || len < String.STRING_EQUALS_IGNORE_CASE_MIN_LENGTH) {
             return regionMatchesCIScalar(value, toffset, other, ooffset, len);
         }
         int result = regionMatchesCIResult(value, toffset, other, ooffset, len);
@@ -424,7 +425,8 @@ final class StringLatin1 {
 
     public static boolean regionMatchesCI_UTF16(byte[] value, int toffset,
                                                 byte[] other, int ooffset, int len) {
-        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS) {
+        if (!String.STRING_EQUALS_IGNORE_CASE_INTRINSICS
+                || len < String.STRING_EQUALS_IGNORE_CASE_MIN_LENGTH) {
             return regionMatchesCI_UTF16Scalar(value, toffset,
                     other, ooffset, len);
         }
