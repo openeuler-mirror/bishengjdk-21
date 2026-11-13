@@ -10341,6 +10341,52 @@ class StubGenerator: public StubCodeGenerator {
     __ ret(lr);
   }
 
+  // Reject a mismatch in the first eight code units before setting up SVE.
+  // Non-ASCII UTF16 prefixes need the full Unicode comparison.
+  void emit_string_equals_ignore_case_prefix(string_compare_mode mode) {
+    Register left = r0, right = r1, len = r2;
+    Register first = r12, second = r13, difference = r6;
+    Label CONTINUE, MISMATCH;
+
+    // The configured intrinsic threshold may be smaller than this prefix.
+    __ cmpw(len, 8);
+    __ br(Assembler::LT, CONTINUE);
+    if (mode == LL) {
+      __ ldr(first, Address(left));
+      __ ldr(second, Address(right));
+      __ eor(difference, first, second);
+      // Case-equivalent Latin1 bytes can differ only in bit 0x20.
+      __ tst(difference, CONST64(0xDFDFDFDFDFDFDFDF));
+      __ br(Assembler::NE, MISMATCH);
+    } else {
+      assert(mode == LU || mode == UU, "supported comparison mode");
+      for (int offset = 0; offset < 8; offset += 4) {
+        if (mode == LU) {
+          __ ldrw(first, Address(left, offset));
+          // Expand four Latin1 bytes into four UTF16 code units.
+          __ orr(first, first, first, Assembler::LSL, 16);
+          __ andr(first, first, CONST64(0x0000FFFF0000FFFF));
+          __ orr(first, first, first, Assembler::LSL, 8);
+          __ andr(first, first, CONST64(0x00FF00FF00FF00FF));
+        } else {
+          __ ldr(first, Address(left, offset * 2));
+        }
+        __ ldr(second, Address(right, offset * 2));
+        __ orr(difference, first, second);
+        __ tst(difference, CONST64(0xFF80FF80FF80FF80));
+        __ br(Assembler::NE, CONTINUE);
+        __ eor(difference, first, second);
+        __ tst(difference, CONST64(0xFFDFFFDFFFDFFFDF));
+        __ br(Assembler::NE, MISMATCH);
+      }
+    }
+    __ b(CONTINUE);
+    __ bind(MISMATCH);
+    __ movw(r0, -2);
+    __ ret(lr);
+    __ bind(CONTINUE);
+  }
+
   // r0: address of the first string and result
   // r1: address of the second string
   // r2: number of code units
@@ -10375,6 +10421,7 @@ class StubGenerator: public StubCodeGenerator {
 
     record_optimization_hit(optimization_id);
 
+    emit_string_equals_ignore_case_prefix(mode);
     if (mode == UU) {
       emit_string_equals_ignore_case_sve_uu();
     } else {

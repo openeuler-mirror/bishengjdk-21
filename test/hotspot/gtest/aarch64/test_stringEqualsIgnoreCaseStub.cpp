@@ -344,6 +344,34 @@ static void fill_uu_pair(int lane, jchar& left, jchar& right) {
 }
 
 template <typename Left, typename Right>
+static bool test_ascii_prefix(address entry,
+                              const RegisterPreservationProbe& probe,
+                              const char* family) {
+  constexpr int len = 8;
+  Left left[len];
+  Right right[len];
+  for (int lane = 0; lane < len; lane++) {
+    left[lane] = static_cast<Left>('a' + lane);
+    right[lane] = static_cast<Right>('A' + lane);
+  }
+  const jbyte* left_bytes = reinterpret_cast<const jbyte*>(left);
+  const jbyte* right_bytes = reinterpret_cast<const jbyte*>(right);
+  bool passed = true;
+  const int mismatch_positions[] = {0, len - 1};
+  for (int position : mismatch_positions) {
+    SCOPED_TRACE(position);
+    const Right saved = right[position];
+    right[position] = static_cast<Right>('0');
+    passed &= expect_result(entry, left_bytes, right_bytes, len, ci_mismatch,
+                            family, "ascii-prefix-mismatch");
+    passed &= expect_preserved(probe, left_bytes, right_bytes, len, ci_mismatch,
+                               family, "ascii-prefix-mismatch");
+    right[position] = saved;
+  }
+  return passed;
+}
+
+template <typename Left, typename Right>
 static bool test_vector_tail(address entry,
                              const RegisterPreservationProbe& probe,
                              const char* family, int vector_lanes,
@@ -459,6 +487,9 @@ TEST_VM(StringEqualsIgnoreCaseStub, direct_stub_abi) {
 
   MACOS_AARCH64_ONLY(os::current_thread_enable_wx(WXExec));
   bool passed = true;
+  passed &= test_ascii_prefix<jbyte, jbyte>(ll, ll_probe, "LL");
+  passed &= test_ascii_prefix<jbyte, jchar>(lu, lu_probe, "LU");
+  passed &= test_ascii_prefix<jchar, jchar>(uu, uu_probe, "UU");
   passed &= test_vector_tail<jbyte, jbyte>(
       ll, ll_probe, "LL", ll_lanes, fill_ll_pair);
   passed &= test_vector_tail<jbyte, jchar>(
