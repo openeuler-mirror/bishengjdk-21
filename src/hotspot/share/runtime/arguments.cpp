@@ -1271,6 +1271,12 @@ bool Arguments::add_property(const char* prop, PropertyWriteable writeable, Prop
     value = &prop[key_len + 1];
   }
 
+  // These properties are private even when initially supplied through -D.
+  if (strcmp(key, "java.lang.Integer.IntegerStringCache.threshold") == 0 ||
+      strcmp(key, "java.lang.Long.LongStringCache.threshold") == 0) {
+    internal = InternalProperty;
+  }
+
 #if INCLUDE_CDS
   if ((is_internal_module_property(key) && !is_module_path_property(key)) ||
       strcmp(key, "jdk.module.main") == 0) {
