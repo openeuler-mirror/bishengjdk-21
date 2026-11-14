@@ -38,6 +38,13 @@ import jdk.test.lib.jfr.Events;
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.event.runtime.TestSystemPropertyEvent
+ * @run main/othervm -Djava.lang.Integer.IntegerStringCache.threshold=2000
+ *      jdk.jfr.event.runtime.TestSystemPropertyEvent
+ * @run main/othervm -Djava.lang.Long.LongStringCache.threshold=2000
+ *      jdk.jfr.event.runtime.TestSystemPropertyEvent
+ * @run main/othervm -Djava.lang.Integer.IntegerStringCache.threshold=2000
+ *      -Djava.lang.Long.LongStringCache.threshold=2000
+ *      jdk.jfr.event.runtime.TestSystemPropertyEvent
  */
 public class TestSystemPropertyEvent {
 
