@@ -41,7 +41,8 @@ import org.openjdk.jmh.annotations.Warmup;
 /**
  * Measures {@link String#equalsIgnoreCase(String)} for every compact-string
  * coder direction around the intrinsic threshold and at representative
- * longer lengths.
+ * longer lengths. The {@code LL} case at length {@code 3} with relation
+ * {@code first} covers the early exit on a short ASCII mismatch.
  *
  * Run separate forks with VM options to compare paths, for example:
  * {@code -XX:-UseStringEqualsIgnoreCaseIntrinsic} for the scalar path and
@@ -58,10 +59,10 @@ public class StringEqualsIgnoreCase {
     @Param({"LL", "LU", "UL", "UU"})
     private String coderPair;
 
-    @Param({"15", "16", "17", "64", "256", "1024"})
+    @Param({"3", "15", "16", "17", "64", "256", "1024"})
     private int length;
 
-    @Param({"equal", "last"})
+    @Param({"equal", "last", "first"})
     private String relation;
 
     private String left;
@@ -103,6 +104,10 @@ public class StringEqualsIgnoreCase {
             case "last" -> {
                 expected = false;
                 rightChars[length - 1] = '#';
+            }
+            case "first" -> {
+                expected = false;
+                rightChars[0] = '#';
             }
             default -> throw new IllegalArgumentException(
                     "Unknown relation: " + relation);
