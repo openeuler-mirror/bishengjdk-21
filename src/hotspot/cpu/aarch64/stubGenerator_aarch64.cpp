@@ -8768,6 +8768,10 @@ class StubGenerator: public StubCodeGenerator {
  
     __ movi(vCalcZero,__ T16B, 0);  // to use in fastascii
     __ movi(vCalcC0,__ T16B, 0xC0); // to check chinafastpath
+    __ movi(vIn2, __ T4H, 0xf0);
+    __ movi(vIn3, __ T4H, 0xe0);
+    __ movi(vCalcMartha, __ T4H, 0x08, 8); // U+0800
+    __ movi(vCalcViki, __ T4H, 0xd800 >> 11);
  
     // __ sub(bytesLeft,len, actPos);
  
@@ -8819,6 +8823,10 @@ class StubGenerator: public StubCodeGenerator {
       __ ins(vCalcSuzie, __ D,vCalcJack,1,0);
  
       __ tbl(vCalcSuzie, __ T16B,vIn0,1,vCalcSuzie); // perm
+
+      // Each of the low four halfwords has a leading byte in its low byte.
+      __ andr(vErrors, __ T8B, vCalcSuzie, vIn2);
+      __ eor(vErrors, __ T8B, vErrors, vIn3);
  
       __ umov(rTemp, vCalcSuzie, __ D, 0); // perm_low
       __ fmovd(vCalcJack,rTemp);
@@ -8830,6 +8838,15 @@ class StubGenerator: public StubCodeGenerator {
       __ rev16(vCalcJack, __ T8B, vCalcJack);  // low
  
       __ sli(vCalcJack, __ T4H, vCalcGreg, 6); // composed
+
+      // Reject overlong encodings and UTF-16 surrogates before committing the batch.
+      __ cm(__ HI, vCalcGreg, __ T4H, vCalcMartha, vCalcJack);
+      __ ushr(vCalcSuzie, __ T4H, vCalcJack, 11);
+      __ cm(__ EQ, vCalcSuzie, __ T4H, vCalcSuzie, vCalcViki);
+      __ orr(vErrors, __ T8B, vErrors, vCalcGreg);
+      __ orr(vErrors, __ T8B, vErrors, vCalcSuzie);
+      __ umov(rTemp, vErrors, __ D, 0);
+      __ cbnz(rTemp, NO_FAST);
  
       __ st1(vCalcJack, __ T8B,__ post(dst, 8));
  
